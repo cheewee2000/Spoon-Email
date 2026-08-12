@@ -46,6 +46,7 @@ public final class AppDatabase: Sendable {
                 t.column("isStarred", .boolean).notNull()
                 t.column("participants", .text).notNull()
                 t.column("messageCount", .integer).notNull()
+                t.column("category", .text).notNull().defaults(to: "important")
                 t.primaryKey(["accountId", "id"])
             }
             try db.create(indexOn: "thread", columns: ["lastDate"])

@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public struct Account: Codable, Identifiable, Hashable, FetchableRecord, PersistableRecord {
+public struct Account: Codable, Sendable, Identifiable, Hashable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "account"
     public var id: String            // UUID string
     public var email: String
@@ -24,7 +24,7 @@ public struct Account: Codable, Identifiable, Hashable, FetchableRecord, Persist
     }
 }
 
-public struct MailThread: Codable, Hashable, FetchableRecord, PersistableRecord {
+public struct MailThread: Codable, Sendable, Hashable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "thread"
     public var accountId: String
     public var id: String            // Gmail thread id
@@ -35,12 +35,13 @@ public struct MailThread: Codable, Hashable, FetchableRecord, PersistableRecord 
     public var isStarred: Bool
     public var participants: String  // display string, e.g. "Alice, Bob"
     public var messageCount: Int
+    public var category: String      // "important" | "newsletters" | "updates" | "other"
 
     // Unique key for SwiftUI lists across accounts
     public var key: String { accountId + "/" + id }
 }
 
-public struct Message: Codable, Hashable, FetchableRecord, PersistableRecord {
+public struct Message: Codable, Sendable, Hashable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "message"
     public var accountId: String
     public var id: String            // Gmail message id
@@ -60,14 +61,14 @@ public struct Message: Codable, Hashable, FetchableRecord, PersistableRecord {
     public var key: String { accountId + "/" + id }
 }
 
-public struct ThreadLabel: Codable, Hashable, FetchableRecord, PersistableRecord {
+public struct ThreadLabel: Codable, Sendable, Hashable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "thread_label"
     public var accountId: String
     public var threadId: String
     public var labelId: String
 }
 
-public struct OutboxItem: Codable, Hashable, FetchableRecord, PersistableRecord, Identifiable {
+public struct OutboxItem: Codable, Sendable, Hashable, FetchableRecord, PersistableRecord, Identifiable {
     public static let databaseTableName = "outbox"
     public var id: String            // UUID
     public var accountId: String
@@ -104,7 +105,7 @@ public struct OutboxItem: Codable, Hashable, FetchableRecord, PersistableRecord,
 }
 
 /// A queued local mutation to replay against Gmail (archive, read, star…).
-public struct PendingOp: Codable, Hashable, FetchableRecord, PersistableRecord {
+public struct PendingOp: Codable, Sendable, Hashable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "pending_op"
     public var id: Int64?
     public var accountId: String
