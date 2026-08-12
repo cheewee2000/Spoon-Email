@@ -81,7 +81,10 @@ enum ThreadHTML {
     /// stylesheets can't bleed into each other or the chrome. A parent
     /// script sizes the frames and routes link clicks to the system browser.
     static func render(messages: [Message]) -> String {
-        let sections = messages.map { m in
+        // Explicit types: GRDB (visible through MailCore) also offers
+        // joined(separator:) on its interpolation-friendly SQL type, and
+        // inference picked it here — turning the page into an SQL debug dump.
+        let sections: String = messages.map { (m: Message) -> String in
             let body: String
             if let html = m.bodyHTML, !html.isEmpty {
                 body = "<iframe class=\"frame\" sandbox=\"allow-same-origin\" srcdoc=\"\(escapeAttr(frameDoc(html)))\"></iframe>"
