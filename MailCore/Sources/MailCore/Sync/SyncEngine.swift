@@ -181,12 +181,12 @@ public actor SyncEngine {
             }
             for m in messages {
                 try m.save(db)
-                try Self.indexFTS(db: db, message: m)
+                try Self.indexFTS(db: db, message: m, subject: thread.subject)
             }
         }
     }
 
-    static func indexFTS(db: Database, message m: Message) throws {
+    static func indexFTS(db: Database, message m: Message, subject: String) throws {
         try db.execute(sql: "DELETE FROM message_fts WHERE accountId = ? AND messageId = ?",
                        arguments: [m.accountId, m.id])
         var body = m.bodyText ?? MimeParser.stripHTML(m.bodyHTML ?? "")
@@ -197,8 +197,18 @@ public actor SyncEngine {
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [m.accountId, m.id, m.threadId,
-                        "", m.fromName + " " + m.fromEmail,
+                        subject, m.fromName + " " + m.fromEmail,
                         m.toList + " " + m.ccList, body])
+    }
+
+    /// Fetches specific threads (e.g. server search results) into the local cache.
+    public func fetchAndStoreThreads(accountId: String, threadIds: [String]) async {
+        let client = GmailClient(accountId: accountId, tokens: tokens)
+        for id in threadIds {
+            if let g = try? await client.getThread(id) {
+                try? await store(gThread: g, accountId: accountId)
+            }
+        }
     }
 
     func deleteLocalThread(accountId: String, threadId: String) async throws {

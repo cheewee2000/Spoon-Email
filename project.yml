@@ -12,7 +12,9 @@ settings:
   base:
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
-    SWIFT_VERSION: 6.0
+    # Swift 5 language mode: GRDB 6 ValueObservation closures crash under
+    # Swift 6 dynamic actor-isolation checking (they run on DB queues).
+    SWIFT_VERSION: 5.0
 targets:
   SuperDuperHuman:
     type: application

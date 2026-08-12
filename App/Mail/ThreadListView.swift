@@ -5,6 +5,7 @@ struct ThreadListView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var listModel: ThreadListModel
     @Binding var selection: MailThread?
+    var searchQuery: String?
 
     var body: some View {
         List(selection: Binding(
@@ -39,11 +40,27 @@ struct ThreadListView: View {
         }
         .overlay {
             if listModel.threads.isEmpty {
-                ContentUnavailableView(
-                    "Inbox Zero",
-                    systemImage: "checkmark.circle",
-                    description: Text("Nothing here.")
-                )
+                if searchQuery != nil {
+                    ContentUnavailableView.search
+                } else {
+                    ContentUnavailableView(
+                        "Inbox Zero",
+                        systemImage: "checkmark.circle",
+                        description: Text("Nothing here.")
+                    )
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let query = searchQuery {
+                Button {
+                    model.serverSearch(query)
+                } label: {
+                    Label("Search Gmail for older mail", systemImage: "icloud.and.arrow.down")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .padding(6)
             }
         }
     }

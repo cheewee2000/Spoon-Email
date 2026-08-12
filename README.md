@@ -30,8 +30,15 @@ review needed while in Testing mode):
 5. Copy the **client ID** (looks like `1234-abc.apps.googleusercontent.com`) into
    `App/Config.swift`.
 
-Scheduled sends fire while the app is running (on iOS, best-effort via background
-refresh).
+Scheduled sends fire while the app is running (on iOS: while the app is open —
+if a scheduled time passes while the app is closed, the send happens the next
+time you open it).
+
+## Keyboard shortcuts (macOS)
+
+`j`/`k` next/prev · `e` archive · `r` reply · `a` reply all · `f` forward ·
+`u` read/unread · `s` star · `c` compose · `⌘K` command palette · `⌘N` new
+message · `⌘R` sync · `⌘Z` undo send (while the toast shows)
 
 ## Building
 

@@ -93,7 +93,14 @@ struct CommandPalette: View {
             focused = true
         }
         .onChange(of: query) { highlighted = 0 }
+        #if os(macOS)
         .onExitCommand { isPresented = false }
+        #else
+        .onKeyPress(.escape) {
+            isPresented = false
+            return .handled
+        }
+        #endif
     }
 
     private func runHighlighted() {

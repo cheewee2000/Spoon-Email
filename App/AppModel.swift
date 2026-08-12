@@ -232,6 +232,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Pulls server-side search results into the local cache; the live FTS
+    /// observation then picks them up automatically.
+    func serverSearch(_ query: String) {
+        Task {
+            syncStatus = "Searching Gmail…"
+            for account in accountStore.accounts {
+                let client = accountStore.client(for: account.id)
+                if let ids = try? await client.searchMessageIds(q: query, maxResults: 25) {
+                    let threadIds = Array(Set(ids.map(\.threadId)))
+                    await syncEngine.fetchAndStoreThreads(accountId: account.id, threadIds: threadIds)
+                }
+            }
+            syncStatus = nil
+        }
+    }
+
     func undoSend() {
         guard let toast = undoToast else { return }
         undoToast = nil

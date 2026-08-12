@@ -6,6 +6,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @StateObject private var listModel = ThreadListModel()
+    @State private var searchText = ""
 
     private let syncTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -13,7 +14,9 @@ struct RootView: View {
         NavigationSplitView {
             sidebar
         } content: {
-            ThreadListView(listModel: listModel, selection: $model.selectedThread)
+            ThreadListView(listModel: listModel, selection: $model.selectedThread,
+                           searchQuery: searchText.isEmpty ? nil : searchText)
+                .searchable(text: $searchText, prompt: "Search all mail")
                 .navigationTitle(listModel.filter.title)
                 .toolbar {
                     ToolbarItem {
@@ -40,8 +43,16 @@ struct RootView: View {
             listModel.observe(db: model.db, filter: .unified)
         }
         .onChange(of: model.mailbox) {
+            searchText = ""
             listModel.observe(db: model.db, filter: model.mailbox ?? .unified)
             model.selectedThread = nil
+        }
+        .onChange(of: searchText) {
+            if searchText.isEmpty {
+                listModel.observe(db: model.db, filter: model.mailbox ?? .unified)
+            } else {
+                listModel.observeSearch(db: model.db, query: searchText)
+            }
         }
         .onReceive(syncTimer) { _ in model.syncNow() }
         .sheet(item: $model.draft) { draft in
@@ -147,14 +158,15 @@ struct RootView: View {
                 }
                 AccountsSection(store: model.accountStore, addAccount: model.addAccount)
             }
-            if let status = model.syncStatus {
-                Divider()
-                Text(status)
+            Divider()
+            HStack {
+                Text(model.syncStatus ?? "v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .padding(6)
+                Spacer()
             }
+            .padding(6)
         }
         .navigationTitle("SuperDuperHuman")
         #if os(macOS)
