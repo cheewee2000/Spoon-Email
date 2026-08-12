@@ -47,6 +47,14 @@ public final class AccountStore: ObservableObject {
         return account
     }
 
+    public func toggleUnified(_ account: Account) async {
+        _ = try? await db.writer.write { db in
+            try db.execute(sql: "UPDATE account SET includeInUnified = NOT includeInUnified WHERE id = ?",
+                           arguments: [account.id])
+        }
+        load()
+    }
+
     public func removeAccount(_ account: Account) async {
         await tokens.remove(accountId: account.id)
         _ = try? await db.writer.write { db in

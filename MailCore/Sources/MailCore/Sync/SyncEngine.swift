@@ -146,10 +146,12 @@ public actor SyncEngine {
 
         var labelSet = Set<String>()
         var messages: [Message] = []
+        var attachments: [Attachment] = []
         for g in gMessages {
-            let (m, labels) = MimeParser.localMessage(from: g, accountId: accountId)
+            let (m, labels, atts) = MimeParser.localMessage(from: g, accountId: accountId)
             messages.append(m)
             labelSet.formUnion(labels)
+            attachments.append(contentsOf: atts)
         }
         messages.sort { $0.date < $1.date }
 
@@ -169,10 +171,12 @@ public actor SyncEngine {
             isStarred: labelSet.contains(GmailLabels.starred),
             participants: participants.joined(separator: ", "),
             messageCount: messages.count,
-            category: ThreadCategory.derive(from: labelSet)
+            category: ThreadCategory.derive(from: labelSet),
+            hasDraft: labelSet.contains(GmailLabels.draft),
+            hasAttachments: !attachments.isEmpty
         )
 
-        try await db.writer.write { db in
+        try await db.writer.write { [labelSet, messages, attachments] db in
             try thread.save(db)
             try db.execute(sql: "DELETE FROM thread_label WHERE accountId = ? AND threadId = ?",
                            arguments: [accountId, gThread.id])
@@ -181,9 +185,75 @@ public actor SyncEngine {
             }
             for m in messages {
                 try m.save(db)
+                try db.execute(sql: "DELETE FROM attachment WHERE accountId = ? AND messageId = ?",
+                               arguments: [accountId, m.id])
                 try Self.indexFTS(db: db, message: m, subject: thread.subject)
             }
+            for a in attachments {
+                try a.save(db)
+            }
         }
+
+        // Blocked sender/domain → auto-archive on arrival
+        if labelSet.contains(GmailLabels.inbox) {
+            let senders = messages.map(\.fromEmail)
+            if try await matchesBlockRule(senders: senders) {
+                await archive(accountId: accountId, threadId: gThread.id)
+            }
+        }
+    }
+
+    // MARK: - Block rules
+
+    private var blockRulesCache: [BlockRule]?
+
+    private func blockRules() async throws -> [BlockRule] {
+        if let cached = blockRulesCache { return cached }
+        let rules = try await db.writer.read { db in
+            try BlockRule.fetchAll(db)
+        }
+        blockRulesCache = rules
+        return rules
+    }
+
+    private func matchesBlockRule(senders: [String]) async throws -> Bool {
+        let rules = try await blockRules()
+        guard !rules.isEmpty else { return false }
+        return senders.contains { s in rules.contains { $0.matches(email: s) } }
+    }
+
+    /// Adds a block rule and archives every inbox thread that matches it.
+    public func addBlock(pattern: String, kind: String) async throws {
+        let rule = BlockRule(pattern: pattern.lowercased(), kind: kind)
+        _ = try? await db.writer.write { db in
+            try rule.save(db)
+        }
+        blockRulesCache = nil
+
+        let rows: [(String, String)] = try await db.writer.read { db in
+            let sql = """
+                SELECT DISTINCT t.accountId, t.id FROM thread t
+                JOIN thread_label tl ON tl.accountId = t.accountId AND tl.threadId = t.id AND tl.labelId = ?
+                JOIN message m ON m.accountId = t.accountId AND m.threadId = t.id
+                WHERE (? = 'email' AND lower(m.fromEmail) = ?)
+                   OR (? = 'domain' AND lower(m.fromEmail) LIKE '%@' || ?)
+                """
+            return try Row.fetchAll(db, sql: sql, arguments: [
+                GmailLabels.inbox, kind, rule.pattern, kind, rule.pattern,
+            ]).map { ($0[0], $0[1]) }
+        }
+        for (accountId, threadId) in rows {
+            await archive(accountId: accountId, threadId: threadId)
+        }
+    }
+
+    public func removeBlock(_ rule: BlockRule) async {
+        _ = try? await db.writer.write { db in try rule.delete(db) }
+        blockRulesCache = nil
+    }
+
+    public func allBlocks() async -> [BlockRule] {
+        (try? await blockRules()) ?? []
     }
 
     static func indexFTS(db: Database, message m: Message, subject: String) throws {

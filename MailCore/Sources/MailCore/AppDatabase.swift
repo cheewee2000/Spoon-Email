@@ -106,6 +106,29 @@ public final class AppDatabase: Sendable {
                 )
                 """)
         }
+        m.registerMigration("v2") { db in
+            try db.execute(sql: "ALTER TABLE account ADD COLUMN includeInUnified BOOLEAN NOT NULL DEFAULT 1")
+            try db.execute(sql: "ALTER TABLE message ADD COLUMN listUnsubscribe TEXT NOT NULL DEFAULT ''")
+            try db.execute(sql: "ALTER TABLE message ADD COLUMN listUnsubscribePost TEXT NOT NULL DEFAULT ''")
+            try db.execute(sql: "ALTER TABLE message ADD COLUMN isDraft BOOLEAN NOT NULL DEFAULT 0")
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN hasDraft BOOLEAN NOT NULL DEFAULT 0")
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN hasAttachments BOOLEAN NOT NULL DEFAULT 0")
+            try db.create(table: "blocked") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("pattern", .text).notNull().unique()   // email or bare domain, lowercase
+                t.column("kind", .text).notNull()               // "email" | "domain"
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(table: "attachment") { t in
+                t.column("accountId", .text).notNull()
+                t.column("messageId", .text).notNull()
+                t.column("partId", .text).notNull()
+                t.column("filename", .text).notNull()
+                t.column("mimeType", .text).notNull()
+                t.column("size", .integer).notNull()
+                t.primaryKey(["accountId", "messageId", "partId"])
+            }
+        }
         return m
     }
 }

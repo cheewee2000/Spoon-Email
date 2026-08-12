@@ -26,6 +26,7 @@ public struct GMessage: Decodable, Sendable {
 }
 
 public struct GPart: Decodable, Sendable {
+    public let partId: String?
     public let mimeType: String?
     public let filename: String?
     public let headers: [GHeader]?
@@ -41,6 +42,7 @@ public struct GHeader: Decodable, Sendable {
 public struct GBody: Decodable, Sendable {
     public let data: String?
     public let size: Int?
+    public let attachmentId: String?
 }
 
 public struct GHistoryList: Decodable, Sendable {
@@ -114,8 +116,9 @@ public enum MimeParser {
         return (name.isEmpty ? email : name, email)
     }
 
-    /// Converts a Gmail API message into our local Message + its label ids.
-    public static func localMessage(from g: GMessage, accountId: String) -> (Message, [String]) {
+    /// Converts a Gmail API message into our local Message, its label ids,
+    /// and its attachment metadata.
+    public static func localMessage(from g: GMessage, accountId: String) -> (Message, [String], [Attachment]) {
         let from = parseAddress(header(g.payload, "From"))
         let (html, text) = bodies(of: g.payload)
         let dateMs = Double(g.internalDate ?? "0") ?? 0
@@ -135,9 +138,56 @@ public enum MimeParser {
             messageIdHeader: header(g.payload, "Message-ID").isEmpty
                 ? header(g.payload, "Message-Id")
                 : header(g.payload, "Message-ID"),
-            referencesHeader: header(g.payload, "References")
+            referencesHeader: header(g.payload, "References"),
+            listUnsubscribe: header(g.payload, "List-Unsubscribe"),
+            listUnsubscribePost: header(g.payload, "List-Unsubscribe-Post"),
+            isDraft: g.labelIds?.contains(GmailLabels.draft) ?? false
         )
-        return (msg, g.labelIds ?? [])
+        return (msg, g.labelIds ?? [], attachments(of: g, accountId: accountId))
+    }
+
+    /// Parts with a filename are attachments (inline cid images excluded
+    /// only when they have no filename).
+    static func attachments(of g: GMessage, accountId: String) -> [Attachment] {
+        var found: [Attachment] = []
+        func walk(_ p: GPart?) {
+            guard let p else { return }
+            if let name = p.filename, !name.isEmpty {
+                found.append(Attachment(
+                    accountId: accountId, messageId: g.id,
+                    partId: p.partId ?? String(found.count),
+                    filename: name,
+                    mimeType: p.mimeType ?? "application/octet-stream",
+                    size: p.body?.size ?? 0))
+            }
+            p.parts?.forEach { walk($0) }
+        }
+        walk(g.payload)
+        return found
+    }
+
+    /// Splits plain text into (new content, quoted trail) at the first
+    /// quote marker, so replies can collapse the history.
+    public static func splitQuoted(_ text: String) -> (main: String, quoted: String?) {
+        let lines = text.components(separatedBy: "\n")
+        var cut: Int?
+        var sawContent = false
+        for (i, line) in lines.enumerated() {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            let isMarker = t.hasPrefix(">")
+                || (t.hasPrefix("On ") && t.hasSuffix("wrote:"))
+                || t.hasPrefix("-----Original Message-----")
+                || t.hasPrefix("---------- Forwarded message")
+            if isMarker {
+                // Only fold when there's real content above the quote trail
+                if sawContent { cut = i }
+                break
+            }
+            if !t.isEmpty { sawContent = true }
+        }
+        guard let cut else { return (text, nil) }
+        return (lines[..<cut].joined(separator: "\n"),
+                lines[cut...].joined(separator: "\n"))
     }
 
     public static func subject(of g: GMessage) -> String {

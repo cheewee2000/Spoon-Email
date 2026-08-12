@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     @Published var mailbox: MailboxFilter? = .unified
     @Published var selectedThread: MailThread?
     @Published var showPalette = false
+    @Published var showBlocked = false
 
     static let undoWindow: TimeInterval = 10
 
@@ -229,6 +230,101 @@ final class AppModel: ObservableObject {
             } catch {
                 lastError = error.localizedDescription
             }
+        }
+    }
+
+    // MARK: - Unsubscribe / block / attachments
+
+    func unsubscribe(_ thread: MailThread) {
+        Task {
+            guard let m = lastMessage(in: thread),
+                  let links = Unsubscriber.parse(header: m.listUnsubscribe,
+                                                 postHeader: m.listUnsubscribePost) else {
+                lastError = "No unsubscribe information in this message."
+                return
+            }
+            do {
+                switch try await Unsubscriber.perform(links) {
+                case .oneClickDone:
+                    flash("Unsubscribed from \(m.fromEmail)")
+                case .openedBrowser(let url):
+                    #if os(macOS)
+                    NSWorkspace.shared.open(url)
+                    #else
+                    await UIApplication.shared.open(url)
+                    #endif
+                case .sendEmail(let to, let subject):
+                    let item = OutboxItem(
+                        accountId: thread.accountId, threadId: nil,
+                        toList: to, ccList: "", bccList: "",
+                        subject: subject, bodyText: "unsubscribe",
+                        sendAt: Date())
+                    try await outbox.schedule(item)
+                    flash("Unsubscribe email sent to \(to)")
+                }
+            } catch {
+                lastError = "Unsubscribe failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func block(_ thread: MailThread, wholeDomain: Bool) {
+        Task {
+            guard let m = lastMessage(in: thread) else { return }
+            let email = m.fromEmail.lowercased()
+            let pattern = wholeDomain ? String(email.split(separator: "@").last ?? "") : email
+            guard !pattern.isEmpty else { return }
+            do {
+                try await syncEngine.addBlock(pattern: pattern,
+                                              kind: wholeDomain ? "domain" : "email")
+                flash("Blocked \(pattern) — matching mail auto-archives")
+            } catch {
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
+    func loadBlockRules() async -> [BlockRule] {
+        await syncEngine.allBlocks()
+    }
+
+    func unblock(_ rule: BlockRule) {
+        Task { await syncEngine.removeBlock(rule) }
+    }
+
+    func download(_ attachment: Attachment) {
+        Task {
+            flash("Downloading \(attachment.filename)…")
+            do {
+                let client = accountStore.client(for: attachment.accountId)
+                let data = try await client.downloadAttachment(
+                    messageId: attachment.messageId, partId: attachment.partId)
+                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                var url = downloads.appendingPathComponent(attachment.filename)
+                var n = 1
+                while FileManager.default.fileExists(atPath: url.path) {
+                    let base = (attachment.filename as NSString).deletingPathExtension
+                    let ext = (attachment.filename as NSString).pathExtension
+                    url = downloads.appendingPathComponent("\(base)-\(n)\(ext.isEmpty ? "" : "." + ext)")
+                    n += 1
+                }
+                try data.write(to: url)
+                flash("Saved \(url.lastPathComponent) to Downloads")
+                #if os(macOS)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+                #endif
+            } catch {
+                lastError = "Download failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Transient status-bar message.
+    private func flash(_ text: String) {
+        syncStatus = text
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if syncStatus == text { syncStatus = nil }
         }
     }
 

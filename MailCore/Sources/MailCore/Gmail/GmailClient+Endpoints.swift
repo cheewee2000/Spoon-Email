@@ -36,6 +36,30 @@ public extension GmailClient {
         return try await post("messages/send", json: body)
     }
 
+    func getMessage(_ id: String) async throws -> GMessage {
+        try await get("messages/\(id)", query: [.init(name: "format", value: "full")])
+    }
+
+    /// Downloads one attachment's bytes. Gmail attachment ids rotate, so we
+    /// re-fetch the message and locate the part by its stable partId.
+    func downloadAttachment(messageId: String, partId: String) async throws -> Data {
+        struct AttachmentBody: Decodable { let data: String? }
+        let message = try await getMessage(messageId)
+        var attachmentId: String?
+        func walk(_ p: GPart?) {
+            guard let p else { return }
+            if p.partId == partId { attachmentId = p.body?.attachmentId }
+            p.parts?.forEach { walk($0) }
+        }
+        walk(message.payload)
+        guard let attachmentId else { throw MailError.http(404, "attachment part not found") }
+        let body: AttachmentBody = try await get("messages/\(messageId)/attachments/\(attachmentId)")
+        guard let data = body.data, let decoded = MimeParser.base64URLDecode(data) else {
+            throw MailError.http(422, "attachment data undecodable")
+        }
+        return decoded
+    }
+
     /// Server-side search (for results beyond the local cache).
     func searchMessageIds(q: String, maxResults: Int = 25) async throws -> [GMessageMin] {
         struct MsgList: Decodable { let messages: [GMessageMin]? }

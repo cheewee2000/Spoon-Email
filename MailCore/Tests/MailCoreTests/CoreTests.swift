@@ -117,6 +117,46 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(hits.count, 1)
     }
 
+    // MARK: - Quoted-text splitting
+
+    func testSplitQuoted() {
+        let (main, quoted) = MimeParser.splitQuoted(
+            "Thanks, sounds good!\n\nOn Aug 11, 2026, Bob <b@x.com> wrote:\n> earlier\n> text")
+        XCTAssertEqual(main, "Thanks, sounds good!\n")
+        XCTAssertTrue(quoted?.hasPrefix("On Aug 11") ?? false)
+
+        let none = MimeParser.splitQuoted("Just a plain message.\nNo quotes here.")
+        XCTAssertNil(none.quoted)
+
+        // A leading quote marker on line 0 is not a trail — keep everything visible
+        let leading = MimeParser.splitQuoted("> whole message is a quote\n> more")
+        XCTAssertNil(leading.quoted)
+    }
+
+    // MARK: - Unsubscribe header parsing
+
+    func testUnsubscribeParse() {
+        let links = Unsubscriber.parse(
+            header: "<mailto:unsub@list.com?subject=stop>, <https://list.com/u?id=1>",
+            postHeader: "List-Unsubscribe=One-Click")
+        XCTAssertEqual(links?.https?.host, "list.com")
+        XCTAssertEqual(links?.mailto?.scheme, "mailto")
+        XCTAssertTrue(links?.oneClick ?? false)
+        XCTAssertNil(Unsubscriber.parse(header: "", postHeader: ""))
+    }
+
+    // MARK: - Block rules
+
+    func testBlockRuleMatching() {
+        let email = BlockRule(pattern: "spam@foo.com", kind: "email")
+        XCTAssertTrue(email.matches(email: "Spam@Foo.com"))
+        XCTAssertFalse(email.matches(email: "other@foo.com"))
+
+        let domain = BlockRule(pattern: "foo.com", kind: "domain")
+        XCTAssertTrue(domain.matches(email: "anyone@foo.com"))
+        XCTAssertFalse(domain.matches(email: "anyone@notfoo.com.evil.net"))
+    }
+
     // MARK: - Optimistic mutations
 
     func testModifyThreadUpdatesLocallyAndQueuesOp() async throws {
@@ -126,7 +166,8 @@ final class CoreTests: XCTestCase {
             try account.insert(db)
             try MailThread(accountId: "acc1", id: "t1", subject: "s", snippet: "",
                            lastDate: Date(), isUnread: true, isStarred: false,
-                           participants: "", messageCount: 1, category: "important").insert(db)
+                           participants: "", messageCount: 1, category: "important",
+                           hasDraft: false, hasAttachments: false).insert(db)
             try ThreadLabel(accountId: "acc1", threadId: "t1", labelId: "INBOX").insert(db)
             try ThreadLabel(accountId: "acc1", threadId: "t1", labelId: "UNREAD").insert(db)
         }

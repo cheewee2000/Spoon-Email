@@ -114,7 +114,17 @@ struct ThreadRow: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
+                    if thread.hasDraft {
+                        Text("Draft")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.orange)
+                    }
                     Spacer()
+                    if thread.hasAttachments {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
                     if thread.isStarred {
                         Image(systemName: "star.fill")
                             .font(.system(size: 10))

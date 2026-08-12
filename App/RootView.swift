@@ -59,6 +59,10 @@ struct RootView: View {
             ComposeView(draft: draft)
                 .environmentObject(model)
         }
+        .sheet(isPresented: $model.showBlocked) {
+            BlockedListView()
+                .environmentObject(model)
+        }
         .overlay(alignment: .top) {
             if model.showPalette {
                 CommandPalette(actions: paletteActions, isPresented: $model.showPalette)
@@ -124,12 +128,27 @@ struct RootView: View {
         actions.append(PaletteAction("Sync Now", systemImage: "arrow.clockwise", shortcut: "⌘R") {
             model.syncNow()
         })
+        if let t = model.selectedThread {
+            actions.append(PaletteAction("Unsubscribe", systemImage: "envelope.arrow.triangle.branch") {
+                model.unsubscribe(t)
+            })
+            actions.append(PaletteAction("Block Sender", systemImage: "person.slash") {
+                model.block(t, wholeDomain: false)
+            })
+            actions.append(PaletteAction("Block Domain", systemImage: "globe.badge.chevron.backward") {
+                model.block(t, wholeDomain: true)
+            })
+        }
+        actions.append(PaletteAction("Manage Blocked Senders", systemImage: "hand.raised") {
+            model.showBlocked = true
+        })
         let boxes: [(String, MailboxFilter, String)] = [
             ("Go to Unified Inbox", .unified, "tray.full"),
             ("Go to Important", .important, "star"),
             ("Go to Newsletters", .newsletters, "newspaper"),
             ("Go to Updates", .updates, "bell"),
             ("Go to Other", .other, "tray"),
+            ("Go to Drafts", .drafts, "doc.badge.ellipsis"),
             ("Go to Sent", .sent, "paperplane"),
         ]
         for (title, box, icon) in boxes {
@@ -154,6 +173,7 @@ struct RootView: View {
                     Label("Other", systemImage: "tray").tag(MailboxFilter.other)
                 }
                 Section("Mail") {
+                    Label("Drafts", systemImage: "doc.badge.ellipsis").tag(MailboxFilter.drafts)
                     Label("Sent", systemImage: "paperplane").tag(MailboxFilter.sent)
                 }
                 AccountsSection(store: model.accountStore, addAccount: model.addAccount)
@@ -206,13 +226,23 @@ struct AccountsSection: View {
     var body: some View {
         Section("Accounts") {
             ForEach(store.accounts) { account in
-                Label(account.email, systemImage: "person.circle")
-                    .tag(MailboxFilter.account(account.id))
-                    .contextMenu {
-                        Button("Remove Account", role: .destructive) {
-                            Task { await store.removeAccount(account) }
-                        }
+                Label {
+                    Text(account.email)
+                        .foregroundStyle(account.includeInUnified ? .primary : .secondary)
+                } icon: {
+                    Image(systemName: account.includeInUnified ? "person.circle" : "person.circle.fill")
+                }
+                .tag(MailboxFilter.account(account.id))
+                .contextMenu {
+                    Toggle("Include in Unified Inbox", isOn: Binding(
+                        get: { account.includeInUnified },
+                        set: { _ in Task { await store.toggleUnified(account) } }
+                    ))
+                    Divider()
+                    Button("Remove Account", role: .destructive) {
+                        Task { await store.removeAccount(account) }
                     }
+                }
             }
             Button(action: addAccount) {
                 Label("Add Account…", systemImage: "plus.circle")

@@ -10,10 +10,11 @@ public struct Account: Codable, Sendable, Identifiable, Hashable, FetchableRecor
     public var lastSyncAt: Date?
     public var sortOrder: Int
     public var backfillDone: Bool
+    public var includeInUnified: Bool
 
     public init(id: String = UUID().uuidString, email: String, displayName: String = "",
                 historyId: String? = nil, lastSyncAt: Date? = nil, sortOrder: Int = 0,
-                backfillDone: Bool = false) {
+                backfillDone: Bool = false, includeInUnified: Bool = true) {
         self.id = id
         self.email = email
         self.displayName = displayName
@@ -21,6 +22,7 @@ public struct Account: Codable, Sendable, Identifiable, Hashable, FetchableRecor
         self.lastSyncAt = lastSyncAt
         self.sortOrder = sortOrder
         self.backfillDone = backfillDone
+        self.includeInUnified = includeInUnified
     }
 }
 
@@ -36,6 +38,8 @@ public struct MailThread: Codable, Sendable, Hashable, FetchableRecord, Persista
     public var participants: String  // display string, e.g. "Alice, Bob"
     public var messageCount: Int
     public var category: String      // "important" | "newsletters" | "updates" | "other"
+    public var hasDraft: Bool
+    public var hasAttachments: Bool
 
     // Unique key for SwiftUI lists across accounts
     public var key: String { accountId + "/" + id }
@@ -57,8 +61,45 @@ public struct Message: Codable, Sendable, Hashable, FetchableRecord, Persistable
     public var isUnread: Bool
     public var messageIdHeader: String   // RFC 822 Message-ID, for replies
     public var referencesHeader: String
+    public var listUnsubscribe: String       // raw List-Unsubscribe header ("" if none)
+    public var listUnsubscribePost: String   // raw List-Unsubscribe-Post header
+    public var isDraft: Bool
 
     public var key: String { accountId + "/" + id }
+}
+
+public struct Attachment: Codable, Sendable, Hashable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "attachment"
+    public var accountId: String
+    public var messageId: String
+    public var partId: String     // stable part id within the message
+    public var filename: String
+    public var mimeType: String
+    public var size: Int
+}
+
+public struct BlockRule: Codable, Sendable, Hashable, Identifiable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "blocked"
+    public var id: Int64?
+    public var pattern: String   // "spam@foo.com" or "foo.com"
+    public var kind: String      // "email" | "domain"
+    public var createdAt: Date
+
+    public init(id: Int64? = nil, pattern: String, kind: String, createdAt: Date = Date()) {
+        self.id = id
+        self.pattern = pattern
+        self.kind = kind
+        self.createdAt = createdAt
+    }
+
+    public mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+
+    public func matches(email: String) -> Bool {
+        let e = email.lowercased()
+        return kind == "email" ? e == pattern : e.hasSuffix("@" + pattern)
+    }
 }
 
 public struct ThreadLabel: Codable, Sendable, Hashable, FetchableRecord, PersistableRecord {
@@ -137,6 +178,7 @@ public enum GmailLabels {
     public static let unread = "UNREAD"
     public static let starred = "STARRED"
     public static let sent = "SENT"
+    public static let draft = "DRAFT"
     public static let trash = "TRASH"
     public static let spam = "SPAM"
     public static let important = "IMPORTANT"

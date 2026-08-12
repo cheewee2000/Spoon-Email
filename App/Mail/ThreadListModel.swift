@@ -65,29 +65,40 @@ final class ThreadListModel: ObservableObject {
     }
 }
 
-/// Live message list for one thread.
+/// Live message list (plus attachment metadata) for one thread.
 @MainActor
 final class ThreadDetailModel: ObservableObject {
     @Published private(set) var messages: [Message] = []
+    @Published private(set) var attachments: [String: [Attachment]] = [:]
     private var cancellable: AnyDatabaseCancellable?
 
     func observe(db: AppDatabase, thread: MailThread) {
         cancellable?.cancel()
         let accountId = thread.accountId
         let threadId = thread.id
-        let observation = ValueObservation.tracking { db in
-            try Message.fetchAll(
+        let observation = ValueObservation.tracking { db -> ([Message], [Attachment]) in
+            let messages = try Message.fetchAll(
                 db,
                 sql: "SELECT * FROM message WHERE accountId = ? AND threadId = ? ORDER BY date",
                 arguments: [accountId, threadId])
+            let attachments = try Attachment.fetchAll(
+                db,
+                sql: """
+                SELECT a.* FROM attachment a
+                JOIN message m ON m.accountId = a.accountId AND m.id = a.messageId
+                WHERE m.accountId = ? AND m.threadId = ?
+                """,
+                arguments: [accountId, threadId])
+            return (messages, attachments)
         }
         cancellable = observation.start(
             in: db.writer,
             scheduling: .async(onQueue: .main)
         ) { error in
             print("message observation error: \(error)")
-        } onChange: { [weak self] messages in
+        } onChange: { [weak self] (messages, attachments) in
             self?.messages = messages
+            self?.attachments = Dictionary(grouping: attachments, by: \.messageId)
         }
     }
 }
