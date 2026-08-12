@@ -14,6 +14,9 @@ final class AppModel: ObservableObject {
     @Published var syncStatus: String?
     @Published var draft: ComposeDraft?
     @Published var undoToast: (id: String, until: Date)?
+    @Published var mailbox: MailboxFilter? = .unified
+    @Published var selectedThread: MailThread?
+    @Published var showPalette = false
 
     static let undoWindow: TimeInterval = 10
 
@@ -89,6 +92,44 @@ final class AppModel: ObservableObject {
 
     func toggleStar(_ thread: MailThread) {
         Task { await syncEngine.toggleStar(accountId: thread.accountId, threadId: thread.id, starred: !thread.isStarred) }
+    }
+
+    // MARK: - Keyboard navigation
+
+    func selectNext(in threads: [MailThread]) {
+        guard !threads.isEmpty else { return }
+        guard let sel = selectedThread,
+              let idx = threads.firstIndex(where: { $0.key == sel.key }) else {
+            selectedThread = threads.first
+            return
+        }
+        if idx + 1 < threads.count { selectedThread = threads[idx + 1] }
+    }
+
+    func selectPrevious(in threads: [MailThread]) {
+        guard !threads.isEmpty else { return }
+        guard let sel = selectedThread,
+              let idx = threads.firstIndex(where: { $0.key == sel.key }) else {
+            selectedThread = threads.first
+            return
+        }
+        if idx > 0 { selectedThread = threads[idx - 1] }
+    }
+
+    /// Archive the selection and advance to the next thread (Superhuman "e").
+    func archiveSelected(in threads: [MailThread]) {
+        guard let sel = selectedThread else { return }
+        let idx = threads.firstIndex { $0.key == sel.key }
+        archive(sel)
+        if let idx {
+            if idx + 1 < threads.count {
+                selectedThread = threads[idx + 1]
+            } else if idx > 0 {
+                selectedThread = threads[idx - 1]
+            } else {
+                selectedThread = nil
+            }
+        }
     }
 
     // MARK: - Compose

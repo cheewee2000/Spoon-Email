@@ -34,6 +34,9 @@ struct ThreadListView: View {
             }
         }
         .listStyle(.plain)
+        .onKeyPress(phases: .down) { press in
+            handleKey(press)
+        }
         .overlay {
             if listModel.threads.isEmpty {
                 ContentUnavailableView(
@@ -43,6 +46,34 @@ struct ThreadListView: View {
                 )
             }
         }
+    }
+
+    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        guard press.modifiers.isEmpty else { return .ignored }
+        let threads = listModel.threads
+        switch press.characters {
+        case "j":
+            model.selectNext(in: threads)
+        case "k":
+            model.selectPrevious(in: threads)
+        case "e":
+            model.archiveSelected(in: threads)
+        case "u":
+            if let t = selection { model.markRead(t, read: t.isUnread) }
+        case "s":
+            if let t = selection { model.toggleStar(t) }
+        case "r":
+            if let t = selection { model.reply(to: t, all: false) }
+        case "a":
+            if let t = selection { model.reply(to: t, all: true) }
+        case "f":
+            if let t = selection { model.forward(t) }
+        case "c":
+            model.compose()
+        default:
+            return .ignored
+        }
+        return .handled
     }
 }
 

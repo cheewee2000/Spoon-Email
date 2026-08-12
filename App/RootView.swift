@@ -5,8 +5,6 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var mailbox: MailboxFilter? = .unified
-    @State private var selectedThread: MailThread?
     @StateObject private var listModel = ThreadListModel()
 
     private let syncTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
@@ -15,7 +13,7 @@ struct RootView: View {
         NavigationSplitView {
             sidebar
         } content: {
-            ThreadListView(listModel: listModel, selection: $selectedThread)
+            ThreadListView(listModel: listModel, selection: $model.selectedThread)
                 .navigationTitle(listModel.filter.title)
                 .toolbar {
                     ToolbarItem {
@@ -31,7 +29,7 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340)
                 #endif
         } detail: {
-            if let thread = selectedThread {
+            if let thread = model.selectedThread {
                 ThreadDetailView(thread: thread)
             } else {
                 Text("Select a conversation")
@@ -41,14 +39,26 @@ struct RootView: View {
         .onAppear {
             listModel.observe(db: model.db, filter: .unified)
         }
-        .onChange(of: mailbox) {
-            listModel.observe(db: model.db, filter: mailbox ?? .unified)
-            selectedThread = nil
+        .onChange(of: model.mailbox) {
+            listModel.observe(db: model.db, filter: model.mailbox ?? .unified)
+            model.selectedThread = nil
         }
         .onReceive(syncTimer) { _ in model.syncNow() }
         .sheet(item: $model.draft) { draft in
             ComposeView(draft: draft)
                 .environmentObject(model)
+        }
+        .overlay(alignment: .top) {
+            if model.showPalette {
+                CommandPalette(actions: paletteActions, isPresented: $model.showPalette)
+                    .padding(.top, 80)
+                    .zIndex(10)
+            }
+        }
+        .background {
+            Button("") { model.showPalette.toggle() }
+                .keyboardShortcut("k", modifiers: .command)
+                .hidden()
         }
         .overlay(alignment: .bottom) {
             if let toast = model.undoToast {
@@ -73,9 +83,58 @@ struct RootView: View {
         }
     }
 
+    private var paletteActions: [PaletteAction] {
+        var actions: [PaletteAction] = []
+        if let t = model.selectedThread {
+            actions.append(PaletteAction("Archive", systemImage: "archivebox", shortcut: "E") {
+                model.archiveSelected(in: listModel.threads)
+            })
+            actions.append(PaletteAction("Reply", systemImage: "arrowshape.turn.up.left", shortcut: "R") {
+                model.reply(to: t, all: false)
+            })
+            actions.append(PaletteAction("Reply All", systemImage: "arrowshape.turn.up.left.2", shortcut: "A") {
+                model.reply(to: t, all: true)
+            })
+            actions.append(PaletteAction("Forward", systemImage: "arrowshape.turn.up.right", shortcut: "F") {
+                model.forward(t)
+            })
+            actions.append(PaletteAction(t.isUnread ? "Mark Read" : "Mark Unread",
+                                         systemImage: "envelope.badge", shortcut: "U") {
+                model.markRead(t, read: t.isUnread)
+            })
+            actions.append(PaletteAction(t.isStarred ? "Unstar" : "Star",
+                                         systemImage: "star", shortcut: "S") {
+                model.toggleStar(t)
+            })
+        }
+        actions.append(PaletteAction("Compose", systemImage: "square.and.pencil", shortcut: "C") {
+            model.compose()
+        })
+        actions.append(PaletteAction("Sync Now", systemImage: "arrow.clockwise", shortcut: "⌘R") {
+            model.syncNow()
+        })
+        let boxes: [(String, MailboxFilter, String)] = [
+            ("Go to Unified Inbox", .unified, "tray.full"),
+            ("Go to Important", .important, "star"),
+            ("Go to Newsletters", .newsletters, "newspaper"),
+            ("Go to Updates", .updates, "bell"),
+            ("Go to Other", .other, "tray"),
+            ("Go to Sent", .sent, "paperplane"),
+        ]
+        for (title, box, icon) in boxes {
+            actions.append(PaletteAction(title, systemImage: icon) { model.mailbox = box })
+        }
+        for account in model.accountStore.accounts {
+            actions.append(PaletteAction("Go to \(account.email)", systemImage: "person.circle") {
+                model.mailbox = .account(account.id)
+            })
+        }
+        return actions
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
-            List(selection: $mailbox) {
+            List(selection: $model.mailbox) {
                 Section("Inbox") {
                     Label("Unified", systemImage: "tray.full").tag(MailboxFilter.unified)
                     Label("Important", systemImage: "star").tag(MailboxFilter.important)
