@@ -17,6 +17,16 @@ struct RootView: View {
         } content: {
             ThreadListView(listModel: listModel, selection: $selectedThread)
                 .navigationTitle(listModel.filter.title)
+                .toolbar {
+                    ToolbarItem {
+                        Button {
+                            model.compose()
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .help("Compose (C)")
+                    }
+                }
                 #if os(macOS)
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340)
                 #endif
@@ -36,6 +46,20 @@ struct RootView: View {
             selectedThread = nil
         }
         .onReceive(syncTimer) { _ in model.syncNow() }
+        .sheet(item: $model.draft) { draft in
+            ComposeView(draft: draft)
+                .environmentObject(model)
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = model.undoToast {
+                UndoToast(until: toast.until) {
+                    model.undoSend()
+                } expired: {
+                    model.undoToast = nil
+                }
+                .padding(.bottom, 16)
+            }
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active { model.syncNow() }
         }
@@ -77,6 +101,30 @@ struct RootView: View {
         #if os(macOS)
         .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         #endif
+    }
+}
+
+struct UndoToast: View {
+    let until: Date
+    let undo: () -> Void
+    let expired: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = max(0, Int(until.timeIntervalSince(context.date).rounded(.up)))
+            HStack(spacing: 12) {
+                Text("Sending in \(remaining)s")
+                Button("Undo", action: undo)
+                    .keyboardShortcut("z", modifiers: .command)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4)
+            .onChange(of: context.date) {
+                if context.date >= until { expired() }
+            }
+        }
     }
 }
 

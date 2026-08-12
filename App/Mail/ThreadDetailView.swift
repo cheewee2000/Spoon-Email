@@ -20,6 +20,24 @@ struct ThreadDetailView: View {
                 }
                 Spacer()
                 Button {
+                    model.reply(to: thread, all: false)
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.left")
+                }
+                .help("Reply (R)")
+                Button {
+                    model.reply(to: thread, all: true)
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.left.2")
+                }
+                .help("Reply All (A)")
+                Button {
+                    model.forward(thread)
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.right")
+                }
+                .help("Forward (F)")
+                Button {
                     model.toggleStar(thread)
                 } label: {
                     Image(systemName: thread.isStarred ? "star.fill" : "star")
