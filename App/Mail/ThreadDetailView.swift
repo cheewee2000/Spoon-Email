@@ -77,13 +77,16 @@ struct ThreadDetailView: View {
 }
 
 enum ThreadHTML {
+    /// Each HTML message renders in its own sandboxed iframe so email
+    /// stylesheets can't bleed into each other or the chrome. A parent
+    /// script sizes the frames and routes link clicks to the system browser.
     static func render(messages: [Message]) -> String {
         let sections = messages.map { m in
             let body: String
             if let html = m.bodyHTML, !html.isEmpty {
-                body = html
+                body = "<iframe class=\"frame\" sandbox=\"allow-same-origin\" srcdoc=\"\(escapeAttr(frameDoc(html)))\"></iframe>"
             } else {
-                body = "<div style='white-space:pre-wrap'>\(escape(m.bodyText ?? ""))</div>"
+                body = "<div class='plain'>\(escape(m.bodyText ?? ""))</div>"
             }
             let date = m.date.formatted(date: .abbreviated, time: .shortened)
             return """
@@ -94,7 +97,7 @@ enum ThreadHTML {
                 <span class="date">\(escape(date))</span>
                 <div class="to">to \(escape(m.toList))</div>
               </div>
-              <div class="body">\(body)</div>
+              \(body)
             </section>
             """
         }.joined(separator: "\n")
@@ -111,10 +114,42 @@ enum ThreadHTML {
           .from { font-weight: 600; }
           .addr, .date, .to { color: gray; font-size: 12px; }
           .date { float: right; }
-          .body { overflow-x: auto; }
-          .body img { max-width: 100%; height: auto; }
-          blockquote { border-left: 2px solid rgba(128,128,128,0.4); margin: 8px 0; padding-left: 10px; color: gray; }
-        </style></head><body>\(sections)</body></html>
+          .plain { white-space: pre-wrap; overflow-x: auto; }
+          .frame { width: 100%; border: none; height: 120px; background: #fff; border-radius: 4px; }
+        </style></head><body>\(sections)
+        <script>
+        function fit(f) {
+          try {
+            var d = f.contentDocument;
+            if (!d || !d.documentElement) return;
+            f.style.height = Math.min(d.documentElement.scrollHeight + 24, 20000) + 'px';
+            if (!f.dataset.hooked) {
+              f.dataset.hooked = '1';
+              d.addEventListener('click', function (e) {
+                var a = e.target.closest ? e.target.closest('a') : null;
+                if (a && a.href) { e.preventDefault(); window.location.href = a.href; }
+              }, true);
+            }
+          } catch (err) {}
+        }
+        function fitAll() { document.querySelectorAll('iframe.frame').forEach(fit); }
+        // Re-measure a few times while remote images stream in.
+        [0, 250, 600, 1200, 2500].forEach(function (t) { setTimeout(fitAll, t); });
+        </script>
+        </body></html>
+        """
+    }
+
+    /// Wraps one email's HTML with sane defaults; emails render on white
+    /// like they were designed for, regardless of app theme.
+    private static func frameDoc(_ html: String) -> String {
+        """
+        <style>
+          body { margin: 8px; font: 13px -apple-system, sans-serif; background: #fff; color: #000; }
+          img { max-width: 100% !important; height: auto !important; }
+          blockquote { border-left: 2px solid #ccc; margin: 8px 0; padding-left: 10px; color: #555; }
+        </style>
+        \(html)
         """
     }
 
@@ -122,6 +157,11 @@ enum ThreadHTML {
         s.replacingOccurrences(of: "&", with: "&amp;")
          .replacingOccurrences(of: "<", with: "&lt;")
          .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    static func escapeAttr(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+         .replacingOccurrences(of: "\"", with: "&quot;")
     }
 }
 
@@ -133,7 +173,9 @@ struct MessageWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        // Parent page JS sizes the message iframes; email content itself
+        // stays script-free (iframe sandbox has no allow-scripts).
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
@@ -155,7 +197,9 @@ struct MessageWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        // Parent page JS sizes the message iframes; email content itself
+        // stays script-free (iframe sandbox has no allow-scripts).
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.isOpaque = false
@@ -179,7 +223,10 @@ final class WebCoordinator: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {
+        // Any http(s) navigation (link click or the iframe click-forwarder
+        // setting window.location) opens in the system browser instead.
+        if let url = navigationAction.request.url,
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             #if os(macOS)
             NSWorkspace.shared.open(url)
             #else

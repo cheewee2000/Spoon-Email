@@ -3,5 +3,5 @@ import Foundation
 enum Config {
     /// Google OAuth client ID (type "iOS", bundle id com.cwandt.superduperhuman).
     /// See README "One-time Google Cloud setup".
-    static let googleClientID = "PASTE_YOUR_CLIENT_ID.apps.googleusercontent.com"
+    static let googleClientID = "840573971970-f1em7jc7gkh3rkkd2puv388eu48plj91.apps.googleusercontent.com"
 }
