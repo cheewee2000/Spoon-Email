@@ -12,26 +12,31 @@ struct ThreadListView: View {
             get: { selection?.key },
             set: { key in selection = listModel.threads.first { $0.key == key } }
         )) {
+            // NavigationLink, not a bare .tag: on iOS a List selection binding
+            // only reacts to taps in edit mode, so tagged rows are dead to
+            // touch. A link with a value matching the selection type drives
+            // the split view on both platforms (and pushes when collapsed).
             ForEach(listModel.threads, id: \.key) { thread in
-                ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
-                    .tag(thread.key)
-                    .swipeActions(edge: .trailing) {
-                        Button {
-                            model.archive(thread)
-                        } label: {
-                            Label("Archive", systemImage: "archivebox")
-                        }
-                        .tint(.green)
+                NavigationLink(value: thread.key) {
+                    ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
+                }
+                .swipeActions(edge: .trailing) {
+                    Button {
+                        model.archive(thread)
+                    } label: {
+                        Label("Archive", systemImage: "archivebox")
                     }
-                    .contextMenu {
-                        Button("Archive") { model.archive(thread) }
-                        Button(thread.isUnread ? "Mark Read" : "Mark Unread") {
-                            model.markRead(thread, read: thread.isUnread)
-                        }
-                        Button(thread.isStarred ? "Unstar" : "Star") {
-                            model.toggleStar(thread)
-                        }
+                    .tint(.green)
+                }
+                .contextMenu {
+                    Button("Archive") { model.archive(thread) }
+                    Button(thread.isUnread ? "Mark Read" : "Mark Unread") {
+                        model.markRead(thread, read: thread.isUnread)
                     }
+                    Button(thread.isStarred ? "Unstar" : "Star") {
+                        model.toggleStar(thread)
+                    }
+                }
             }
         }
         .listStyle(.plain)

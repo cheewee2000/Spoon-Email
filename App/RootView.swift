@@ -166,15 +166,15 @@ struct RootView: View {
         VStack(spacing: 0) {
             List(selection: $model.mailbox) {
                 Section("Inbox") {
-                    Label("Unified", systemImage: "tray.full").tag(MailboxFilter.unified)
-                    Label("Important", systemImage: "star").tag(MailboxFilter.important)
-                    Label("Newsletters", systemImage: "newspaper").tag(MailboxFilter.newsletters)
-                    Label("Updates", systemImage: "bell").tag(MailboxFilter.updates)
-                    Label("Other", systemImage: "tray").tag(MailboxFilter.other)
+                    MailboxLink("Unified", "tray.full", .unified)
+                    MailboxLink("Important", "star", .important)
+                    MailboxLink("Newsletters", "newspaper", .newsletters)
+                    MailboxLink("Updates", "bell", .updates)
+                    MailboxLink("Other", "tray", .other)
                 }
                 Section("Mail") {
-                    Label("Drafts", systemImage: "doc.badge.ellipsis").tag(MailboxFilter.drafts)
-                    Label("Sent", systemImage: "paperplane").tag(MailboxFilter.sent)
+                    MailboxLink("Drafts", "doc.badge.ellipsis", .drafts)
+                    MailboxLink("Sent", "paperplane", .sent)
                 }
                 AccountsSection(store: model.accountStore, addAccount: model.addAccount)
             }
@@ -219,6 +219,27 @@ struct UndoToast: View {
     }
 }
 
+/// Sidebar row that drives the split view's mailbox selection. A
+/// NavigationLink rather than a tagged row: on iOS a List selection binding
+/// only reacts to taps in edit mode, so tagged rows never select.
+struct MailboxLink: View {
+    let title: String
+    let systemImage: String
+    let filter: MailboxFilter
+
+    init(_ title: String, _ systemImage: String, _ filter: MailboxFilter) {
+        self.title = title
+        self.systemImage = systemImage
+        self.filter = filter
+    }
+
+    var body: some View {
+        NavigationLink(value: filter) {
+            Label(title, systemImage: systemImage)
+        }
+    }
+}
+
 struct AccountsSection: View {
     @ObservedObject var store: AccountStore
     let addAccount: () -> Void
@@ -226,13 +247,14 @@ struct AccountsSection: View {
     var body: some View {
         Section("Accounts") {
             ForEach(store.accounts) { account in
-                Label {
-                    Text(account.email)
-                        .foregroundStyle(account.includeInUnified ? .primary : .secondary)
-                } icon: {
-                    Image(systemName: account.includeInUnified ? "person.circle" : "person.circle.fill")
+                NavigationLink(value: MailboxFilter.account(account.id)) {
+                    Label {
+                        Text(account.email)
+                            .foregroundStyle(account.includeInUnified ? .primary : .secondary)
+                    } icon: {
+                        Image(systemName: account.includeInUnified ? "person.circle" : "person.circle.fill")
+                    }
                 }
-                .tag(MailboxFilter.account(account.id))
                 .contextMenu {
                     Toggle("Include in Unified Inbox", isOn: Binding(
                         get: { account.includeInUnified },
