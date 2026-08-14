@@ -1,4 +1,4 @@
-name: Spoon
+name: Spoon Email
 options:
   bundleIdPrefix: com.cwandt
   deploymentTarget:
@@ -10,13 +10,13 @@ packages:
     path: MailCore
 settings:
   base:
-    MARKETING_VERSION: 0.11.0
+    MARKETING_VERSION: 0.11.1
     CURRENT_PROJECT_VERSION: 1
     # Swift 5 language mode: GRDB 6 ValueObservation closures crash under
     # Swift 6 dynamic actor-isolation checking (they run on DB queues).
     SWIFT_VERSION: 5.0
 targets:
-  Spoon:
+  Spoon Email:
     type: application
     supportedDestinations: [macOS, iOS]
     sources:

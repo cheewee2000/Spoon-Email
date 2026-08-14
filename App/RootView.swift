@@ -403,7 +403,7 @@ struct RootView: View {
             footer
         }
         .environment(\.railExpanded, sidebarExpanded)
-        .navigationTitle("Spoon")
+        .navigationTitle("Spoon Email")
         #if os(macOS)
         .navigationSplitViewColumnWidth(sidebarExpanded ? RailWidth.expanded : RailWidth.collapsed)
         #endif

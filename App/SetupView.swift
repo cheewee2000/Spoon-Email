@@ -16,9 +16,9 @@ struct ClientSetupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Connect Spoon to Gmail")
+            Text("Connect Spoon Email to Gmail")
                 .font(.title2).bold()
-            Text("Spoon talks to Gmail with your own free Google OAuth client — your mail never touches anyone else's server. One-time setup, about 5 minutes:")
+            Text("Spoon Email talks to Gmail with your own free Google OAuth client — your mail never touches anyone else's server. One-time setup, about 5 minutes:")
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
                 step(1, "Open [console.cloud.google.com](https://console.cloud.google.com) and create a project (any name).")
@@ -78,7 +78,7 @@ struct WelcomeView: View {
                 Image("Logo")
                     .resizable()
                     .frame(width: 56, height: 56)
-                Text("Spoon")
+                Text("Spoon Email")
                     .font(.largeTitle).bold()
                 Text("A fast, keyboard-first Gmail client.\nConnect a Google account to begin.")
                     .multilineTextAlignment(.center)

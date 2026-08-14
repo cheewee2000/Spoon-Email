@@ -1,11 +1,11 @@
-# Spoon
+# Spoon Email
 
 A fast, keyboard-first Gmail client for macOS and iOS in the spirit of Superhuman.
 Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
-**Version 0.11.0**
+**Version 0.11.1**
 
-![Spoon screenshot](Screenshot%202026-08-12%20at%208.10.49%20AM.png)
+![Spoon Email screenshot](Screenshot%202026-08-12%20at%208.10.49%20AM.png)
 
 ## Features
 
@@ -20,9 +20,9 @@ Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
 ## Getting started
 
-Spoon talks to the Gmail API with **your own** free Google OAuth client, so your
-mail never flows through anyone else's infrastructure. The first time you click
-**Add Account**, Spoon walks you through the one-time setup (~5 min):
+Spoon Email talks to the Gmail API with **your own** free Google OAuth client, so
+your mail never flows through anyone else's infrastructure. The first time you
+click **Add Account**, Spoon Email walks you through the one-time setup (~5 min):
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create a
    new project (any name, e.g. `spoon`).
@@ -52,13 +52,13 @@ message · `⌘R` sync · `⌘Z` undo send (while the toast shows)
 ```sh
 brew install xcodegen   # once
 xcodegen generate
-open Spoon.xcodeproj
+open "Spoon Email.xcodeproj"
 ```
 
 Or from the CLI:
 
 ```sh
-xcodebuild -project Spoon.xcodeproj -scheme Spoon \
+xcodebuild -project "Spoon Email.xcodeproj" -scheme "Spoon Email" \
   -destination 'platform=macOS' build
 ```
 
