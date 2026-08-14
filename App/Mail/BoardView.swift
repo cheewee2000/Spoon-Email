@@ -196,6 +196,7 @@ private struct BoardColumn: View {
                             model.toggleOpen(thread)
                         }
                     }
+                    .hotkeyHoverTarget(thread, model: model)
                     Divider().opacity(0.5)
                 }
             }

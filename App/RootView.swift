@@ -229,25 +229,38 @@ struct RootView: View {
             model.compose()
             return true
         }
-        // Everything below acts on the full-width list's selection, which the
-        // board doesn't have — its columns each hold their own.
-        guard model.mailbox != nil else { return false }
+        // The row under the pointer beats the list selection as the target,
+        // so hover-then-keystroke triages without a click — including on the
+        // board, whose columns have no selection of their own.
+        let hovered = model.hoveredThread
+        guard model.mailbox != nil || hovered != nil else { return false }
         let threads = listModel.threads
+        let target = hovered ?? model.selectedThread
         switch event.charactersIgnoringModifiers {
-        case "j": model.selectNext(in: threads)
-        case "k": model.selectPrevious(in: threads)
-        case "e": model.archiveSelected(in: threads)
-        case "u": guard let t = model.selectedThread else { return false }
+        case "j": guard model.mailbox != nil else { return false }
+                  model.selectNext(in: threads)
+        case "k": guard model.mailbox != nil else { return false }
+                  model.selectPrevious(in: threads)
+        case "e": guard let t = target else { return false }
+                  // Archiving the selection advances it to the next row; keep
+                  // that behavior when the pointer happens to sit on the
+                  // selected row.
+                  if hovered == nil || hovered?.key == model.selectedThread?.key {
+                      model.archiveSelected(in: threads)
+                  } else {
+                      model.archive(t)
+                  }
+        case "u": guard let t = target else { return false }
                   model.markRead(t, read: t.isUnread)
-        case "s": guard let t = model.selectedThread else { return false }
+        case "s": guard let t = target else { return false }
                   model.toggleStar(t)
-        case "o": guard let t = model.selectedThread else { return false }
+        case "o": guard let t = target else { return false }
                   model.toggleOpen(t)
-        case "r": guard let t = model.selectedThread else { return false }
+        case "r": guard let t = target else { return false }
                   model.reply(to: t, all: false)
-        case "a": guard let t = model.selectedThread else { return false }
+        case "a": guard let t = target else { return false }
                   model.reply(to: t, all: true)
-        case "f": guard let t = model.selectedThread else { return false }
+        case "f": guard let t = target else { return false }
                   model.forward(t)
         default: return false
         }

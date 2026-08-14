@@ -55,6 +55,12 @@ final class AppModel: ObservableObject {
     /// starts and where Escape always lands you.
     @Published var mailbox: MailboxFilter?
     @Published var selectedThread: MailThread?
+    /// The row currently under the pointer, if any — triage hotkeys act on it
+    /// in preference to the selection, so hover-then-keystroke works without a
+    /// click (and on the board, which has no selection at all). Deliberately
+    /// not @Published: no view renders from it, and hover churns too fast to
+    /// be worth an objectWillChange per row crossing.
+    var hoveredThread: MailThread?
     /// Survives the mailbox switch that a drill-in performs, so the thread you
     /// clicked on the board is still selected once its column opens full-width.
     var pendingSelection: MailThread?
