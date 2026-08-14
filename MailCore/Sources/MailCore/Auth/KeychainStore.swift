@@ -67,7 +67,7 @@ public enum MailError: Error, LocalizedError {
         switch self {
         case .keychain(let s): return "Keychain error (\(s))"
         case .oauthFailed(let m): return "Sign-in failed: \(m)"
-        case .notConfigured: return "Paste your Google OAuth client ID into App/Config.swift first (see README)."
+        case .notConfigured: return "Add your Google OAuth client ID first — click Add Account and follow the setup steps."
         case .http(let code, let body): return "Gmail API error \(code): \(body)"
         case .noRefreshToken: return "Account needs to be re-added (no refresh token)."
         }

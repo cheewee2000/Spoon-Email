@@ -8,10 +8,18 @@ import UIKit
 #endif
 
 public struct GoogleOAuthConfig: Sendable {
-    public let clientID: String
+    private let provider: @Sendable () -> String
+
+    /// Resolved on every read, so a client ID saved in-app takes effect
+    /// immediately for the stores that captured this config at startup.
+    public var clientID: String { provider() }
 
     public init(clientID: String) {
-        self.clientID = clientID
+        self.provider = { clientID }
+    }
+
+    public init(clientIDProvider: @escaping @Sendable () -> String) {
+        self.provider = clientIDProvider
     }
 
     public var isConfigured: Bool {

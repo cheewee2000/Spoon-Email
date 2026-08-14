@@ -69,6 +69,9 @@ final class AppModel: ObservableObject {
     }
     @Published var showPalette = false
     @Published var showBlocked = false
+    /// First-run setup: collects the user's Google OAuth client ID before the
+    /// sign-in flow can run.
+    @Published var showClientSetup = false
     @Published var openUnreadCount = 0
     @Published var unsubscribe: UnsubscribeSession?
 
@@ -84,7 +87,7 @@ final class AppModel: ObservableObject {
         } catch {
             fatalError("Cannot open database: \(error)")
         }
-        accountStore = AccountStore(db: db, config: GoogleOAuthConfig(clientID: Config.googleClientID))
+        accountStore = AccountStore(db: db, config: GoogleOAuthConfig(clientIDProvider: { Config.googleClientID }))
         syncEngine = SyncEngine(db: db, tokens: accountStore.tokens)
         outbox = OutboxManager(db: db, tokens: accountStore.tokens)
         notifier.start()
@@ -127,6 +130,12 @@ final class AppModel: ObservableObject {
     // MARK: - Accounts
 
     func addAccount() {
+        // No client ID yet — collect it first; the setup sheet calls back
+        // into this method once one is saved.
+        guard Config.isConfigured else {
+            showClientSetup = true
+            return
+        }
         Task {
             do {
                 try await accountStore.addAccount()

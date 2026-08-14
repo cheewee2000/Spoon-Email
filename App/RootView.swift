@@ -101,6 +101,14 @@ struct RootView: View {
             BlockedListView()
                 .environmentObject(model)
         }
+        .sheet(isPresented: $model.showClientSetup) {
+            ClientSetupSheet()
+                .environmentObject(model)
+        }
+        // Fresh install: nothing behind this is useful until an account exists.
+        .overlay {
+            WelcomeView(store: model.accountStore, addAccount: model.addAccount)
+        }
         .sheet(item: $model.unsubscribe) { session in
             UnsubscribeSheet(session: session)
                 .environmentObject(model)
