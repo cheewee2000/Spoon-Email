@@ -3,6 +3,55 @@ import XCTest
 
 final class CoreTests: XCTestCase {
 
+    // MARK: - Address lists
+
+    func testSplitKeepsQuotedCommasTogether() {
+        XCTAssertEqual(
+            AddressList.split("\"Doe, John\" <j@x.com>, jo@y.com, \"Ann\" <a@z.com>"),
+            ["\"Doe, John\" <j@x.com>", "jo@y.com", "\"Ann\" <a@z.com>"],
+            "a comma inside a quoted display name is part of the name, not a separator")
+        XCTAssertEqual(AddressList.split(""), [])
+        XCTAssertEqual(AddressList.split("  , ,jo@y.com,"), ["jo@y.com"])
+    }
+
+    func testEmailIdentityIgnoresDisplayNameAndCase() {
+        XCTAssertEqual(AddressList.email(of: "Jo Smith <Jo@X.com>"), "jo@x.com")
+        XCTAssertEqual(AddressList.email(of: "  JO@x.com "), "jo@x.com")
+        XCTAssertEqual(AddressList.email(of: "\"Doe, John\" <j@x.com>"), "j@x.com")
+    }
+
+    func testReplyAllPutsEachPersonInExactlyOneField() {
+        // The sender is also in To, and one recipient appears in both To and
+        // Cc — spelled differently every time.
+        let result = AddressList.replyRecipients(
+            to: ["Ann <ann@x.com>"],
+            others: AddressList.split("ANN@x.com, Bob <bob@y.com>, me@z.com")
+                + AddressList.split("bob@y.com, Cat <cat@w.com>"),
+            me: "me@z.com")
+
+        XCTAssertEqual(result.to, ["Ann <ann@x.com>"])
+        XCTAssertEqual(result.cc, ["Bob <bob@y.com>", "Cat <cat@w.com>"],
+                       "nobody in To may reappear in Cc, and nobody twice in Cc")
+        XCTAssertFalse(result.cc.contains { AddressList.email(of: $0) == "me@z.com" },
+                       "the account replying is never one of its own recipients")
+    }
+
+    func testReplyToYourOwnMessageKeepsItsRecipients() {
+        let result = AddressList.replyRecipients(
+            to: AddressList.split("Ann <ann@x.com>, bob@y.com"),
+            others: AddressList.split("Ann <ann@x.com>, bob@y.com"),
+            me: "me@z.com")
+        XCTAssertEqual(result.to, ["Ann <ann@x.com>", "bob@y.com"])
+        XCTAssertEqual(result.cc, [], "everyone was already in To")
+    }
+
+    func testReplyingOnlyToYourselfStillHasARecipient() {
+        let result = AddressList.replyRecipients(
+            to: ["me@z.com"], others: [], me: "me@z.com")
+        XCTAssertEqual(result.to, ["me@z.com"],
+                       "dropping yourself here would leave nowhere to send")
+    }
+
     // MARK: - MIME builder
 
     func testMimeBuilderHeadersAndBody() throws {
@@ -22,6 +71,148 @@ final class CoreTests: XCTestCase {
         // The plain-text part decodes back to the original body
         let b64 = Data("Line one\nLine two".utf8).base64EncodedString()
         XCTAssertTrue(raw.replacingOccurrences(of: "\r\n", with: "").contains(b64))
+    }
+
+    /// A rich reply ships its formatting in the HTML part while the text/plain
+    /// part stays readable for clients that only take plain text.
+    func testMimeBuilderUsesRichBodyForHTMLPart() throws {
+        let data = MimeBuilder.build(
+            fromEmail: "me@example.com",
+            to: "you@example.com", cc: "", bcc: "",
+            subject: "Hi", bodyText: "bold word",
+            bodyHTML: "<div><b>bold</b> word</div>",
+            quotedText: "> earlier", quotedHTML: "<blockquote>earlier</blockquote>",
+            inReplyTo: "", references: "")
+        let raw = String(data: data, encoding: .utf8)!.replacingOccurrences(of: "\r\n", with: "")
+
+        let html = "<div style=\"font-family:-apple-system,sans-serif;font-size:14px\">"
+            + "<div><b>bold</b> word</div></div><blockquote>earlier</blockquote>"
+        XCTAssertTrue(raw.contains(Data(html.utf8).base64EncodedString()),
+                      "HTML part must carry the composed rich text as-is")
+        XCTAssertTrue(raw.contains(Data("bold word\n\n> earlier".utf8).base64EncodedString()),
+                      "plain part must still be the plain body plus quote")
+    }
+
+    /// An inline image wraps the alternative body in a multipart/related whose
+    /// image part answers to the cid the HTML points at.
+    func testMimeBuilderNestsInlineImagesInRelatedPart() throws {
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47])
+        let image = ComposeAttachment(id: "img-1@sdh", filename: "shot.png",
+                                      mimeType: "image/png", data: bytes)
+        let data = MimeBuilder.build(
+            fromEmail: "me@example.com", to: "you@example.com", cc: "", bcc: "",
+            subject: "Hi", bodyText: "look",
+            bodyHTML: "<div><img src=\"cid:img-1@sdh\"></div>",
+            attachments: [image], inReplyTo: "", references: "")
+        let raw = String(data: data, encoding: .utf8)!
+        let lines = raw.components(separatedBy: "\r\n")
+
+        let related = try XCTUnwrap(lines.first { $0.hasPrefix("Content-Type: multipart/related") })
+        let relatedBoundary = try XCTUnwrap(
+            related.components(separatedBy: "boundary=\"").last?.components(separatedBy: "\"").first)
+        XCTAssertTrue(related.contains("type=\"multipart/alternative\""))
+        XCTAssertTrue(lines.contains { $0.hasPrefix("Content-Type: multipart/alternative") },
+                      "text+html must still be offered as alternatives, nested inside related")
+        XCTAssertTrue(lines.contains("Content-ID: <img-1@sdh>"))
+        XCTAssertTrue(lines.contains("Content-Disposition: inline; filename=\"shot.png\""))
+        XCTAssertTrue(lines.contains(bytes.base64EncodedString()))
+        XCTAssertEqual(lines.last, "--\(relatedBoundary)--", "related part must be closed last")
+    }
+
+    /// A reply to a thread that was parked in "Open" ends the wait, so it
+    /// belongs back in the unified inbox.
+    func testReplyPullsOpenThreadBackIntoUnified() async throws {
+        let db = try AppDatabase.inMemory()
+        let account = Account(id: "acc1", email: "me@example.com", openLabelId: "Label_open")
+        try await db.writer.write { db in try account.insert(db) }
+        let tokens = TokenManager(config: GoogleOAuthConfig(clientID: "x.apps.googleusercontent.com"))
+        let engine = SyncEngine(db: db, tokens: tokens)
+
+        func message(id: String, date: Int, unread: Bool) -> String {
+            """
+            {
+              "id": "\(id)", "threadId": "t1",
+              "labelIds": ["INBOX", "Label_open"\(unread ? ", \"UNREAD\"" : "")],
+              "snippet": "about the invoice",
+              "internalDate": "\(date)",
+              "payload": {
+                "mimeType": "text/plain",
+                "headers": [
+                  {"name": "From", "value": "Ann <ann@example.com>"},
+                  {"name": "To", "value": "me@example.com"},
+                  {"name": "Subject", "value": "Invoice"}
+                ],
+                "body": {"data": "\(GmailClient.base64URLEncode(Data("about the invoice".utf8)))"}
+              }
+            }
+            """
+        }
+        func thread(_ messages: [String]) throws -> GThread {
+            try JSONDecoder().decode(GThread.self, from: Data(
+                "{\"id\": \"t1\", \"messages\": [\(messages.joined(separator: ","))]}".utf8))
+        }
+
+        // Parked in Open, nothing unread: hidden from unified, listed in Open.
+        try await engine.store(gThread: thread([message(id: "m1", date: 1723300000000, unread: false)]),
+                               accountId: "acc1", detectNewMail: true)
+        var unified = try await db.writer.read { db in try MailboxFilter.unified.fetch(db) }
+        var open = try await db.writer.read { db in try MailboxFilter.open.fetch(db) }
+        XCTAssertTrue(unified.isEmpty)
+        XCTAssertEqual(open.count, 1)
+
+        // Ann replies.
+        try await engine.store(gThread: thread([message(id: "m1", date: 1723300000000, unread: false),
+                                                message(id: "m2", date: 1723400000000, unread: true)]),
+                               accountId: "acc1", detectNewMail: true)
+        unified = try await db.writer.read { db in try MailboxFilter.unified.fetch(db) }
+        open = try await db.writer.read { db in try MailboxFilter.open.fetch(db) }
+        XCTAssertEqual(unified.count, 1, "a replied-to thread returns to the inbox")
+        XCTAssertTrue(open.isEmpty, "and stops waiting in Open")
+
+        // The label has to come off on the server too, or the next sync
+        // would park it again.
+        let ops = try await db.writer.read { db in try PendingOp.fetchAll(db) }
+        XCTAssertTrue(ops.contains { $0.removeLabelIds.contains("Label_open") })
+    }
+
+    /// The outbox holds a scheduled send until it's due, so an inline image
+    /// has to survive the trip through SQLite.
+    func testOutboxRoundTripsAttachments() async throws {
+        let db = try AppDatabase.inMemory()
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A])
+        let item = OutboxItem(
+            accountId: "acc1", threadId: nil,
+            toList: "you@example.com", ccList: "", bccList: "",
+            subject: "Hi", bodyText: "look", bodyHTML: "<div><img src=\"cid:img-1@sdh\"></div>",
+            attachments: [ComposeAttachment(id: "img-1@sdh", filename: "shot.png",
+                                            mimeType: "image/png", data: bytes)],
+            sendAt: Date())
+        try await db.writer.write { db in try item.save(db) }
+
+        let loaded = try await db.writer.read { db in try OutboxItem.fetchOne(db) }
+        XCTAssertEqual(loaded?.attachments.count, 1)
+        XCTAssertEqual(loaded?.attachments.first?.data, bytes)
+        XCTAssertEqual(loaded?.attachments.first?.id, "img-1@sdh")
+    }
+
+    /// No images means no extra nesting — plain multipart/alternative.
+    func testMimeBuilderKeepsFlatStructureWithoutAttachments() throws {
+        let data = MimeBuilder.build(
+            fromEmail: "me@example.com", to: "you@example.com", cc: "", bcc: "",
+            subject: "Hi", bodyText: "look", inReplyTo: "", references: "")
+        let raw = String(data: data, encoding: .utf8)!
+        XCTAssertFalse(raw.contains("multipart/related"))
+    }
+
+    /// Drafts written before rich compose have no HTML; they still escape.
+    func testMimeBuilderFallsBackToEscapedPlainText() throws {
+        let data = MimeBuilder.build(
+            fromEmail: "me@example.com", to: "you@example.com", cc: "", bcc: "",
+            subject: "Hi", bodyText: "a < b\nnext", inReplyTo: "", references: "")
+        let raw = String(data: data, encoding: .utf8)!.replacingOccurrences(of: "\r\n", with: "")
+        let html = "<div style=\"font-family:-apple-system,sans-serif;font-size:14px\">"
+            + "a &lt; b<br>next</div>"
+        XCTAssertTrue(raw.contains(Data(html.utf8).base64EncodedString()))
     }
 
     func testMimeBuilderEncodesUnicodeSubject() {
@@ -105,16 +296,39 @@ final class CoreTests: XCTestCase {
 
         // FTS finds it by body text
         let hits = try await db.writer.read { db in
-            try MailThread.fetchAll(db, sql: """
-                SELECT t.* FROM thread t WHERE EXISTS (
-                    SELECT 1 FROM message_fts
-                    WHERE message_fts MATCH ?
-                      AND message_fts.accountId = t.accountId
-                      AND message_fts.threadId = t.id
-                )
-                """, arguments: ["\"widgets\"*"])
+            try MailSearch.threads(db, match: MailSearch.ftsQuery("widgets")!)
         }
         XCTAssertEqual(hits.count, 1)
+    }
+
+    /// Pasted pictures often arrive with a Content-ID and no filename; without
+    /// a part row for them the body's `cid:` reference can never be resolved.
+    func testInlineImageWithoutFilenameIsKept() throws {
+        let json = """
+        {
+          "id": "m1", "threadId": "t1",
+          "payload": {
+            "mimeType": "multipart/related",
+            "parts": [
+              {"partId": "0", "mimeType": "text/html",
+               "body": {"data": "\(GmailClient.base64URLEncode(Data("<img src=\"cid:logo@x\">".utf8)))"}},
+              {"partId": "1", "mimeType": "image/png", "filename": "",
+               "headers": [{"name": "Content-ID", "value": "<logo@x>"}],
+               "body": {"attachmentId": "a1", "size": 12}},
+              {"partId": "2", "mimeType": "application/pdf", "filename": "spec.pdf",
+               "body": {"attachmentId": "a2", "size": 34}}
+            ]
+          }
+        }
+        """
+        let message = try JSONDecoder().decode(GMessage.self, from: Data(json.utf8))
+        let parts = MimeParser.attachments(of: message, accountId: "acc1")
+        XCTAssertEqual(parts.count, 2)
+        let inline = try XCTUnwrap(parts.first { $0.partId == "1" })
+        XCTAssertEqual(inline.contentId, "logo@x")
+        XCTAssertEqual(inline.filename, "image-1.png")
+        // A container part with no Content-ID is still not an attachment.
+        XCTAssertNil(parts.first { $0.mimeType == "multipart/related" })
     }
 
     // MARK: - Quoted-text splitting
@@ -157,6 +371,33 @@ final class CoreTests: XCTestCase {
         XCTAssertFalse(domain.matches(email: "anyone@notfoo.com.evil.net"))
     }
 
+    /// Blocked mail is archived on arrival, so the Blocked mailbox is the only
+    /// place it can still be found — by rule, not by label.
+    func testBlockedMailboxListsWhatTheRulesCaught() async throws {
+        let db = try AppDatabase.inMemory()
+        try await db.writer.write { db in
+            try Account(id: "acc1", email: "me@example.com").insert(db)
+            for (threadId, sender) in [("t1", "Spam@Foo.com"),
+                                       ("t2", "anyone@bar.com"),
+                                       ("t3", "friend@example.org")] {
+                try MailThread(accountId: "acc1", id: threadId, subject: threadId, snippet: "",
+                               lastDate: Date(), isUnread: false, isStarred: false,
+                               participants: "", messageCount: 1, category: "other",
+                               hasDraft: false, hasAttachments: false).insert(db)
+                try Message(accountId: "acc1", id: "m-\(threadId)", threadId: threadId,
+                            fromName: "", fromEmail: sender, toList: "", ccList: "",
+                            date: Date(), snippet: "", bodyHTML: nil, bodyText: nil,
+                            isUnread: false, messageIdHeader: "", referencesHeader: "",
+                            listUnsubscribe: "", listUnsubscribePost: "", isDraft: false).insert(db)
+            }
+            try BlockRule(pattern: "spam@foo.com", kind: "email").insert(db)
+            try BlockRule(pattern: "bar.com", kind: "domain").insert(db)
+        }
+
+        let blocked = try await db.writer.read { db in try MailboxFilter.blocked.fetch(db) }
+        XCTAssertEqual(Set(blocked.map(\.id)), ["t1", "t2"])
+    }
+
     // MARK: - Optimistic mutations
 
     func testModifyThreadUpdatesLocallyAndQueuesOp() async throws {
@@ -183,5 +424,218 @@ final class CoreTests: XCTestCase {
         let ops = try await db.writer.read { db in try PendingOp.fetchAll(db) }
         XCTAssertEqual(ops.count, 1)
         XCTAssertEqual(ops[0].removeLabelIds, "INBOX")
+    }
+
+    /// A draft that was sent (and so removed from its Gmail thread) must not
+    /// survive locally — otherwise it keeps rendering with a DRAFT badge.
+    func testStorePrunesMessagesMissingFromServerThread() async throws {
+        let db = try AppDatabase.inMemory()
+        try await db.writer.write { db in
+            try Account(id: "acc1", email: "me@example.com").insert(db)
+        }
+        let engine = SyncEngine(db: db, tokens: TokenManager(
+            config: GoogleOAuthConfig(clientID: "x.apps.googleusercontent.com")))
+
+        func gThread(messageIds: [String]) throws -> GThread {
+            let messages = messageIds.map { id in
+                """
+                {"id":"\(id)","threadId":"t1","labelIds":["INBOX"],"snippet":"s",
+                 "internalDate":"1700000000000",
+                 "payload":{"partId":"","mimeType":"text/plain",
+                            "headers":[{"name":"From","value":"a@example.com"},
+                                       {"name":"Subject","value":"hello"}],
+                            "body":{"size":0}}}
+                """
+            }.joined(separator: ",")
+            let json = "{\"id\":\"t1\",\"messages\":[\(messages)]}"
+            return try JSONDecoder().decode(GThread.self, from: Data(json.utf8))
+        }
+
+        try await engine.store(gThread: gThread(messageIds: ["m1", "draft1"]), accountId: "acc1")
+        var ids = try await db.writer.read { db in
+            try String.fetchAll(db, sql: "SELECT id FROM message WHERE accountId='acc1' ORDER BY id")
+        }
+        XCTAssertEqual(ids, ["draft1", "m1"])
+
+        // Server thread no longer carries the draft — it must vanish locally.
+        try await engine.store(gThread: gThread(messageIds: ["m1", "m2"]), accountId: "acc1")
+        ids = try await db.writer.read { db in
+            try String.fetchAll(db, sql: "SELECT id FROM message WHERE accountId='acc1' ORDER BY id")
+        }
+        XCTAssertEqual(ids, ["m1", "m2"])
+
+        // The index is contentless and keyed by message rowid, so its rows
+        // are named by joining back through `message`.
+        let ftsIds = try await db.writer.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT m.id FROM message_fts
+                JOIN message m ON m.rowid = message_fts.rowid
+                WHERE m.accountId = 'acc1' ORDER BY m.id
+                """)
+        }
+        XCTAssertEqual(ftsIds, ["m1", "m2"], "search index must drop the sent draft too")
+    }
+
+    /// `store` skips a thread whose fingerprint hasn't moved. The skip must
+    /// never swallow a real change — a label flipping is exactly the case
+    /// that would otherwise leave mail frozen in the wrong state forever.
+    func testStoreSkipsUnchangedButNotChangedThreads() async throws {
+        let db = try AppDatabase.inMemory()
+        try await db.writer.write { db in
+            try Account(id: "acc1", email: "me@example.com").insert(db)
+        }
+        let engine = SyncEngine(db: db, tokens: TokenManager(
+            config: GoogleOAuthConfig(clientID: "x.apps.googleusercontent.com")))
+
+        func gThread(labels: [String], subject: String = "hello") throws -> GThread {
+            let labelJSON = labels.map { "\"\($0)\"" }.joined(separator: ",")
+            let json = """
+            {"id":"t1","messages":[
+              {"id":"m1","threadId":"t1","labelIds":[\(labelJSON)],"snippet":"s",
+               "internalDate":"1700000000000",
+               "payload":{"partId":"","mimeType":"text/plain",
+                          "headers":[{"name":"From","value":"a@example.com"},
+                                     {"name":"Subject","value":"\(subject)"}],
+                          "body":{"size":0}}}]}
+            """
+            return try JSONDecoder().decode(GThread.self, from: Data(json.utf8))
+        }
+        func stored() async throws -> MailThread? {
+            try await db.writer.read { db in
+                try MailThread.fetchOne(db, sql: "SELECT * FROM thread WHERE accountId='acc1' AND id='t1'")
+            }
+        }
+
+        try await engine.store(gThread: gThread(labels: ["INBOX", "UNREAD"]), accountId: "acc1")
+        var t = try await stored()
+        XCTAssertEqual(t?.isUnread, true)
+
+        // Same thread again: nothing to do, and nothing broken by not doing it.
+        try await engine.store(gThread: gThread(labels: ["INBOX", "UNREAD"]), accountId: "acc1")
+        t = try await stored()
+        XCTAssertEqual(t?.isUnread, true)
+        XCTAssertEqual(t?.subject, "hello")
+
+        // Read on the server — the label change must land.
+        try await engine.store(gThread: gThread(labels: ["INBOX"]), accountId: "acc1")
+        t = try await stored()
+        XCTAssertEqual(t?.isUnread, false, "a label change must never be skipped")
+
+        // And a body/subject change with identical labels.
+        try await engine.store(gThread: gThread(labels: ["INBOX"], subject: "edited"),
+                               accountId: "acc1")
+        t = try await stored()
+        XCTAssertEqual(t?.subject, "edited", "a content change must never be skipped")
+
+        let searchable = try await db.writer.read { db in
+            try MailSearch.threads(db, match: MailSearch.ftsQuery("edited")!)
+        }
+        XCTAssertEqual(searchable.map(\.id), ["t1"], "the index must track the change too")
+    }
+
+    /// Archived = out of the inbox, but not trashed, spam, or an unsent
+    /// draft — and never something still sitting in Open.
+    func testArchivedMailbox() async throws {
+        let db = try AppDatabase.inMemory()
+        try await db.writer.write { db in
+            try Account(id: "acc1", email: "me@example.com").insert(db)
+        }
+        let engine = SyncEngine(db: db, tokens: TokenManager(
+            config: GoogleOAuthConfig(clientID: "x.apps.googleusercontent.com")))
+
+        func gThread(id: String, labels: [String]) throws -> GThread {
+            let labelJSON = labels.map { "\"\($0)\"" }.joined(separator: ",")
+            let json: String = """
+            {"id":"\(id)","messages":[
+              {"id":"m_\(id)","threadId":"\(id)","labelIds":[\(labelJSON)],"snippet":"s",
+               "internalDate":"1700000000000",
+               "payload":{"partId":"","mimeType":"text/plain",
+                          "headers":[{"name":"From","value":"a@example.com"},
+                                     {"name":"Subject","value":"\(id)"}],
+                          "body":{"size":0}}}]}
+            """
+            return try JSONDecoder().decode(GThread.self, from: Data(json.utf8))
+        }
+
+        try await engine.store(gThread: gThread(id: "inboxed", labels: ["INBOX"]), accountId: "acc1")
+        try await engine.store(gThread: gThread(id: "archived", labels: ["CATEGORY_PERSONAL"]), accountId: "acc1")
+        try await engine.store(gThread: gThread(id: "archivedSent", labels: ["SENT"]), accountId: "acc1")
+        try await engine.store(gThread: gThread(id: "trashed", labels: ["TRASH"]), accountId: "acc1")
+        try await engine.store(gThread: gThread(id: "spammed", labels: ["SPAM"]), accountId: "acc1")
+        try await engine.store(gThread: gThread(id: "drafted", labels: ["DRAFT"]), accountId: "acc1")
+
+        let ids = try await db.writer.read { db in
+            try MailboxFilter.archived.fetch(db).map(\.id)
+        }.sorted()
+        XCTAssertEqual(ids, ["archived", "archivedSent"],
+                       "archived is all-mail-minus-inbox, excluding trash/spam/drafts")
+
+        // A thread parked in Open is still awaiting action, not archived.
+        try await db.writer.write { db in
+            try db.execute(sql: "UPDATE thread SET isOpen = 1 WHERE id = 'archived'")
+        }
+        let afterOpen = try await db.writer.read { db in
+            try MailboxFilter.archived.fetch(db).map(\.id)
+        }
+        XCTAssertEqual(afterOpen, ["archivedSent"], "Open threads must not show as archived")
+    }
+
+    /// Sending an edited draft deletes it from Gmail, but the history feed
+    /// doesn't report that — the local purge has to clear the DRAFT badge,
+    /// the Drafts mailbox row, and (for a standalone draft) the thread shell.
+    func testPurgeDraftClearsThreadState() async throws {
+        let db = try AppDatabase.inMemory()
+        try await db.writer.write { db in
+            try Account(id: "acc1", email: "me@example.com").insert(db)
+        }
+        let engine = SyncEngine(db: db, tokens: TokenManager(
+            config: GoogleOAuthConfig(clientID: "x.apps.googleusercontent.com")))
+
+        func gThread(id: String, messages: [(String, [String])]) throws -> GThread {
+            // Explicit String: GRDB makes `SQL` expressible by string
+            // interpolation, and inference picks it over String otherwise.
+            let body = messages.map { (mid, labels) -> String in
+                let labelJSON = labels.map { "\"\($0)\"" }.joined(separator: ",")
+                return """
+                {"id":"\(mid)","threadId":"\(id)","labelIds":[\(labelJSON)],"snippet":"s",
+                 "internalDate":"1700000000000",
+                 "payload":{"partId":"","mimeType":"text/plain",
+                            "headers":[{"name":"From","value":"a@example.com"},
+                                       {"name":"Subject","value":"hello"}],
+                            "body":{"size":0}}}
+                """
+            }.joined(separator: ",")
+            let json: String = "{\"id\":\"\(id)\",\"messages\":[\(body)]}"
+            return try JSONDecoder().decode(GThread.self, from: Data(json.utf8))
+        }
+
+        // Reply draft: the thread survives, minus its draft.
+        try await engine.store(gThread: gThread(id: "t1", messages: [
+            ("m1", ["INBOX"]), ("d1", ["DRAFT"]),
+        ]), accountId: "acc1")
+        try await db.purgeDraft(accountId: "acc1", messageId: "d1")
+
+        let thread = try await db.writer.read { db in
+            try MailThread.fetchOne(db, sql: "SELECT * FROM thread WHERE accountId='acc1' AND id='t1'")
+        }
+        XCTAssertEqual(thread?.hasDraft, false, "DRAFT badge must clear")
+        XCTAssertEqual(thread?.messageCount, 1)
+        let labels = try await db.writer.read { db in
+            try String.fetchAll(db, sql: "SELECT labelId FROM thread_label WHERE accountId='acc1' AND threadId='t1'")
+        }
+        XCTAssertFalse(labels.contains("DRAFT"), "thread must leave the Drafts mailbox")
+        let remaining = try await db.writer.read { db in
+            try String.fetchAll(db, sql: "SELECT id FROM message WHERE accountId='acc1' AND threadId='t1'")
+        }
+        XCTAssertEqual(remaining, ["m1"])
+
+        // Standalone draft: nothing left, so the thread shell goes too.
+        try await engine.store(gThread: gThread(id: "t2", messages: [("d2", ["DRAFT"])]),
+                               accountId: "acc1")
+        try await db.purgeDraft(accountId: "acc1", messageId: "d2")
+        let shell = try await db.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM thread WHERE accountId='acc1' AND id='t2'")
+        }
+        XCTAssertEqual(shell, 0, "a draft-only thread must disappear once the draft is sent")
     }
 }

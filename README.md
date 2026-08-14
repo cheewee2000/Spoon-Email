@@ -1,4 +1,4 @@
-# SuperDuperHuman
+# Spoon
 
 A fast, keyboard-first Gmail client for macOS and iOS in the spirit of Superhuman.
 Multiple Gmail accounts, one unified inbox. No calendar, no AI.
@@ -20,13 +20,13 @@ The app talks to the Gmail API with your own OAuth client (free, no verification
 review needed while in Testing mode):
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create a
-   new project (any name, e.g. `superduperhuman`).
+   new project (any name, e.g. `spoon`).
 2. **APIs & Services → Library** → search "Gmail API" → **Enable**.
 3. **APIs & Services → OAuth consent screen** → External → fill in the app name
    and your email → **Audience: Testing** → add each Gmail address you'll connect
    as a **Test user**.
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID** →
-   Application type **iOS** → Bundle ID `com.cwandt.superduperhuman` → Create.
+   Application type **iOS** → Bundle ID `com.cwandt.spoon` → Create.
 5. Copy the **client ID** (looks like `1234-abc.apps.googleusercontent.com`) into
    `App/Config.swift`.
 
@@ -45,13 +45,13 @@ message · `⌘R` sync · `⌘Z` undo send (while the toast shows)
 ```sh
 brew install xcodegen   # once
 xcodegen generate
-open SuperDuperHuman.xcodeproj
+open Spoon.xcodeproj
 ```
 
 Or from the CLI:
 
 ```sh
-xcodebuild -project SuperDuperHuman.xcodeproj -scheme SuperDuperHuman \
+xcodebuild -project Spoon.xcodeproj -scheme Spoon \
   -destination 'platform=macOS' build
 ```
 

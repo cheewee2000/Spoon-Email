@@ -8,15 +8,16 @@ public actor OutboxManager {
     private var accountEmails: [String: String] = [:]
     private var loopTask: Task<Void, Never>?
 
-    /// Called after a message is actually delivered (so the app can resync).
-    private var onSent: (@Sendable (String) -> Void)?
+    /// Called with (accountId, threadId) once a message is actually delivered,
+    /// so the app can pull that thread in immediately.
+    private var onSent: (@Sendable (String, String) -> Void)?
 
     public init(db: AppDatabase, tokens: TokenManager) {
         self.db = db
         self.tokens = tokens
     }
 
-    public func setOnSent(_ handler: @Sendable @escaping (String) -> Void) {
+    public func setOnSent(_ handler: @Sendable @escaping (String, String) -> Void) {
         onSent = handler
     }
 
@@ -66,14 +67,31 @@ public actor OutboxManager {
                 let raw = MimeBuilder.build(
                     fromEmail: fromEmail,
                     to: item.toList, cc: item.ccList, bcc: item.bccList,
-                    subject: item.subject, bodyText: item.bodyText,
+                    subject: item.subject, bodyText: item.bodyText, bodyHTML: item.bodyHTML,
+                    quotedText: item.quotedText, quotedHTML: item.quotedHTML,
+                    attachments: item.attachments,
                     inReplyTo: item.inReplyTo, references: item.references)
                 let client = GmailClient(accountId: item.accountId, tokens: tokens)
-                _ = try await client.send(raw: raw, threadId: item.threadId)
+                let sent = try await client.send(raw: raw, threadId: item.threadId)
+                if !item.draftMessageId.isEmpty {
+                    // The send replaced this draft: delete it from Gmail, then
+                    // from the local cache. Gmail's history feed doesn't report
+                    // draft deletions, so without the local purge the message
+                    // keeps showing as a draft until the next launch's repair.
+                    // If the server delete fails, leave the local row alone so
+                    // the two stay in agreement.
+                    do {
+                        try await client.deleteDraft(messageId: item.draftMessageId)
+                        try await db.purgeDraft(accountId: item.accountId,
+                                                messageId: item.draftMessageId)
+                    } catch {}
+                }
                 _ = try? await db.writer.write { db in
                     try db.execute(sql: "DELETE FROM outbox WHERE id = ?", arguments: [item.id])
                 }
-                onSent?(item.accountId)
+                // The delivered message's own thread — for a new conversation
+                // Gmail assigns one, so this isn't always item.threadId.
+                onSent?(item.accountId, sent.threadId)
             } catch {
                 _ = try? await db.writer.write { db in
                     try db.execute(sql: "UPDATE outbox SET state = 'failed', lastError = ? WHERE id = ?",

@@ -1,0 +1,75 @@
+import SwiftUI
+
+/// The sender's picture, or their initials on a color derived from the
+/// address — so the fallback is still a fixed, recognizable mark per sender
+/// rather than one gray circle repeated down the list.
+struct AvatarView: View {
+    let name: String
+    let email: String
+    var size: CGFloat = 28
+
+    @State private var data: Data?
+
+    var body: some View {
+        Group {
+            if let data, let image = Self.image(from: data) {
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                ZStack {
+                    Self.tint(for: email.isEmpty ? name : email)
+                    Text(Self.initials(name: name, email: email))
+                        .font(.system(size: size * 0.4, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        // Icons come back on transparent or white grounds in every mix; the
+        // hairline keeps them from bleeding into the row.
+        .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+        .task(id: email) {
+            data = nil
+            guard !email.isEmpty else { return }
+            data = await AvatarStore.shared.avatar(for: email)
+        }
+    }
+
+    // MARK: - Fallback
+
+    static func initials(name: String, email: String) -> String {
+        let source = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? email : name
+        let words = source
+            .split(whereSeparator: { $0 == " " || $0 == "," || $0 == "@" || $0 == "." })
+            .filter { $0.first?.isLetter == true || $0.first?.isNumber == true }
+        let letters = words.prefix(2).compactMap { $0.first }
+        return letters.isEmpty ? "?" : String(letters).uppercased()
+    }
+
+    /// Stable per address: the same sender is the same color every session,
+    /// on every machine, without storing anything. Shared with the rendered
+    /// conversation, which draws the same fallback in CSS.
+    static func hue(for key: String) -> Int {
+        var hash: UInt64 = 5381
+        for byte in key.lowercased().utf8 {
+            hash = (hash &* 33) &+ UInt64(byte)
+        }
+        return Int(hash % 360)
+    }
+
+    static func tint(for key: String) -> Color {
+        Color(hue: Double(hue(for: key)) / 360, saturation: 0.55, brightness: 0.65)
+    }
+
+    private static func image(from data: Data) -> Image? {
+        #if os(macOS)
+        guard let native = NSImage(data: data) else { return nil }
+        return Image(nsImage: native)
+        #else
+        guard let native = UIImage(data: data) else { return nil }
+        return Image(uiImage: native)
+        #endif
+    }
+}

@@ -11,10 +11,17 @@ public struct Account: Codable, Sendable, Identifiable, Hashable, FetchableRecor
     public var sortOrder: Int
     public var backfillDone: Bool
     public var includeInUnified: Bool
+    public var backfillPageToken: String?  // resume point while walking the full history
+    public var openLabelId: String?        // Gmail label id of this account's "Open" label
+    /// The color this account wears through the app, as "#RRGGBB". Unset
+    /// means the account takes its slot in the built-in palette instead.
+    public var colorHex: String?
 
     public init(id: String = UUID().uuidString, email: String, displayName: String = "",
                 historyId: String? = nil, lastSyncAt: Date? = nil, sortOrder: Int = 0,
-                backfillDone: Bool = false, includeInUnified: Bool = true) {
+                backfillDone: Bool = false, includeInUnified: Bool = true,
+                backfillPageToken: String? = nil, openLabelId: String? = nil,
+                colorHex: String? = nil) {
         self.id = id
         self.email = email
         self.displayName = displayName
@@ -23,6 +30,9 @@ public struct Account: Codable, Sendable, Identifiable, Hashable, FetchableRecor
         self.sortOrder = sortOrder
         self.backfillDone = backfillDone
         self.includeInUnified = includeInUnified
+        self.backfillPageToken = backfillPageToken
+        self.openLabelId = openLabelId
+        self.colorHex = colorHex
     }
 }
 
@@ -40,6 +50,10 @@ public struct MailThread: Codable, Sendable, Hashable, FetchableRecord, Persista
     public var category: String      // "important" | "newsletters" | "updates" | "other"
     public var hasDraft: Bool
     public var hasAttachments: Bool
+    public var isOpen: Bool = false  // carries the account's "Open" label (awaiting reply / act later)
+    /// Who the newest message came from. The list only stores participants as
+    /// a display string, and an avatar has to be looked up by address.
+    public var lastSenderEmail: String = ""
 
     // Unique key for SwiftUI lists across accounts
     public var key: String { accountId + "/" + id }
@@ -76,6 +90,18 @@ public struct Attachment: Codable, Sendable, Hashable, FetchableRecord, Persista
     public var filename: String
     public var mimeType: String
     public var size: Int
+    public var contentId: String  // Content-ID without <>, "" when not inline
+
+    public init(accountId: String, messageId: String, partId: String,
+                filename: String, mimeType: String, size: Int, contentId: String = "") {
+        self.accountId = accountId
+        self.messageId = messageId
+        self.partId = partId
+        self.filename = filename
+        self.mimeType = mimeType
+        self.size = size
+        self.contentId = contentId
+    }
 }
 
 public struct BlockRule: Codable, Sendable, Hashable, Identifiable, FetchableRecord, PersistableRecord {
@@ -119,15 +145,23 @@ public struct OutboxItem: Codable, Sendable, Hashable, FetchableRecord, Persista
     public var bccList: String
     public var subject: String
     public var bodyText: String
+    public var bodyHTML: String      // rich version of what was typed ("" = plain text only)
+    public var quotedText: String    // plain-text version of the quoted/forwarded trail
+    public var quotedHTML: String?   // original HTML of the quoted/forwarded trail
+    public var attachments: [ComposeAttachment]  // stored as JSON; inline images live here
     public var inReplyTo: String     // Message-ID header of replied-to message ("" if new)
     public var references: String
+    public var draftMessageId: String // Gmail message id of a draft this send replaces ("" if none)
     public var sendAt: Date
     public var state: String         // "scheduled" | "sending" | "failed"
     public var lastError: String?
 
     public init(id: String = UUID().uuidString, accountId: String, threadId: String?,
                 toList: String, ccList: String, bccList: String, subject: String,
-                bodyText: String, inReplyTo: String = "", references: String = "",
+                bodyText: String, bodyHTML: String = "",
+                quotedText: String = "", quotedHTML: String? = nil,
+                attachments: [ComposeAttachment] = [],
+                inReplyTo: String = "", references: String = "", draftMessageId: String = "",
                 sendAt: Date, state: String = "scheduled", lastError: String? = nil) {
         self.id = id
         self.accountId = accountId
@@ -137,8 +171,13 @@ public struct OutboxItem: Codable, Sendable, Hashable, FetchableRecord, Persista
         self.bccList = bccList
         self.subject = subject
         self.bodyText = bodyText
+        self.bodyHTML = bodyHTML
+        self.quotedText = quotedText
+        self.quotedHTML = quotedHTML
+        self.attachments = attachments
         self.inReplyTo = inReplyTo
         self.references = references
+        self.draftMessageId = draftMessageId
         self.sendAt = sendAt
         self.state = state
         self.lastError = lastError

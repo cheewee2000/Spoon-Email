@@ -55,6 +55,15 @@ public final class AccountStore: ObservableObject {
         load()
     }
 
+    /// `nil` puts the account back on the built-in palette.
+    public func setColor(_ account: Account, hex: String?) async {
+        _ = try? await db.writer.write { db in
+            try db.execute(sql: "UPDATE account SET colorHex = ? WHERE id = ?",
+                           arguments: [hex, account.id])
+        }
+        load()
+    }
+
     public func removeAccount(_ account: Account) async {
         await tokens.remove(accountId: account.id)
         _ = try? await db.writer.write { db in

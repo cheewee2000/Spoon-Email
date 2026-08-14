@@ -146,24 +146,46 @@ public enum MimeParser {
         return (msg, g.labelIds ?? [], attachments(of: g, accountId: accountId))
     }
 
-    /// Parts with a filename are attachments (inline cid images excluded
-    /// only when they have no filename).
+    /// Parts with a filename are attachments. Inline images count too even
+    /// when the filename is empty — Apple Mail and Gmail both send pasted
+    /// pictures that way, and without a row here the body's `cid:` reference
+    /// has no part to fetch, so the image renders as a hole.
     static func attachments(of g: GMessage, accountId: String) -> [Attachment] {
         var found: [Attachment] = []
         func walk(_ p: GPart?) {
             guard let p else { return }
-            if let name = p.filename, !name.isEmpty {
+            let mime = p.mimeType ?? "application/octet-stream"
+            let cid = contentId(of: p)
+            let name = p.filename ?? ""
+            if !name.isEmpty || (!cid.isEmpty && mime.hasPrefix("image/")) {
+                let partId = p.partId ?? String(found.count)
                 found.append(Attachment(
                     accountId: accountId, messageId: g.id,
-                    partId: p.partId ?? String(found.count),
-                    filename: name,
-                    mimeType: p.mimeType ?? "application/octet-stream",
-                    size: p.body?.size ?? 0))
+                    partId: partId,
+                    filename: name.isEmpty ? placeholderName(mime: mime, partId: partId) : name,
+                    mimeType: mime,
+                    size: p.body?.size ?? 0,
+                    contentId: cid))
             }
             p.parts?.forEach { walk($0) }
         }
         walk(g.payload)
         return found
+    }
+
+    /// A name for a nameless inline image, so saving it somewhere lands a
+    /// file with a sensible extension.
+    private static func placeholderName(mime: String, partId: String) -> String {
+        let ext = mime.split(separator: "/").last.map(String.init) ?? "img"
+        return "image-\(partId).\(ext)"
+    }
+
+    /// The part's Content-ID with the angle brackets peeled off — this is what
+    /// the HTML body's `cid:` references point at.
+    static func contentId(of part: GPart) -> String {
+        header(part, "Content-ID")
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
     }
 
     /// Splits plain text into (new content, quoted trail) at the first

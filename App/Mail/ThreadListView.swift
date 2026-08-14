@@ -8,6 +8,17 @@ struct ThreadListView: View {
     var searchQuery: String?
 
     var body: some View {
+        threadList
+            // Row .onAppear is unreliable in macOS List, so page in more
+            // threads from the actual scroll position instead.
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 800
+            } action: { _, nearBottom in
+                if nearBottom { listModel.loadMore(db: model.db) }
+            }
+    }
+
+    private var threadList: some View {
         List(selection: Binding(
             get: { selection?.key },
             set: { key in selection = listModel.threads.first { $0.key == key } }
@@ -31,6 +42,9 @@ struct ThreadListView: View {
                         Button(thread.isStarred ? "Unstar" : "Star") {
                             model.toggleStar(thread)
                         }
+                        Button(thread.isOpen ? "Remove from Open" : "Mark Open") {
+                            model.toggleOpen(thread)
+                        }
                     }
             }
         }
@@ -42,6 +56,12 @@ struct ThreadListView: View {
             if listModel.threads.isEmpty {
                 if searchQuery != nil {
                     ContentUnavailableView.search
+                } else if listModel.filter == .blocked {
+                    ContentUnavailableView(
+                        "Nothing Blocked",
+                        systemImage: "hand.raised",
+                        description: Text("Block a sender or domain from a message's ••• menu.")
+                    )
                 } else {
                     ContentUnavailableView(
                         "Inbox Zero",
@@ -79,6 +99,8 @@ struct ThreadListView: View {
             if let t = selection { model.markRead(t, read: t.isUnread) }
         case "s":
             if let t = selection { model.toggleStar(t) }
+        case "o":
+            if let t = selection { model.toggleOpen(t) }
         case "r":
             if let t = selection { model.reply(to: t, all: false) }
         case "a":
@@ -100,14 +122,24 @@ struct ThreadRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
+            // Account accent: every row carries its account's color so
+            // mail from different accounts is tellable at a glance.
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(accountColor.opacity(0.8))
+                .frame(width: 3)
             Circle()
                 .fill(thread.isUnread ? accountColor : .clear)
                 .frame(width: 8, height: 8)
                 .padding(.top, 5)
+            AvatarView(name: thread.participants,
+                       email: thread.lastSenderEmail,
+                       size: 16)
+                .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(thread.participants.isEmpty ? "(unknown)" : thread.participants)
                         .font(.system(size: 13, weight: thread.isUnread ? .bold : .regular))
+                        .foregroundStyle(thread.isUnread ? accountColor : .primary)
                         .lineLimit(1)
                     if thread.messageCount > 1 {
                         Text("\(thread.messageCount)")
@@ -115,9 +147,13 @@ struct ThreadRow: View {
                             .foregroundStyle(.secondary)
                     }
                     if thread.hasDraft {
-                        Text("Draft")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.orange)
+                        // A word-sized badge crowded out the sender on every
+                        // row in Drafts, where every row has one; the dot says
+                        // the same thing at a glance.
+                        Circle()
+                            .fill(.orange)
+                            .frame(width: 5, height: 5)
+                            .help("Unsent draft")
                     }
                     Spacer()
                     if thread.hasAttachments {

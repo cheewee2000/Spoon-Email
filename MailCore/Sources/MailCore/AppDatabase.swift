@@ -11,12 +11,28 @@ public final class AppDatabase: Sendable {
 
     /// Opens the on-disk database in Application Support.
     public static func open() throws -> AppDatabase {
-        let dir = try FileManager.default.url(
+        let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true
-        ).appendingPathComponent("SuperDuperHuman", isDirectory: true)
+        )
+        let dir = support.appendingPathComponent("Spoon", isDirectory: true)
+        // Installs from before the rename keep their mailbox — move it over.
+        let legacy = support.appendingPathComponent("SuperDuperHuman", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path),
+           FileManager.default.fileExists(atPath: legacy.path) {
+            try? FileManager.default.moveItem(at: legacy, to: dir)
+        }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let pool = try DatabasePool(path: dir.appendingPathComponent("mail.sqlite").path)
+        var config = Configuration()
+        config.prepareDatabase { db in
+            // WAL + synchronous=NORMAL: a commit no longer waits on an fsync,
+            // which is what sync does thousands of times. Durable against a
+            // crash; only a power cut can cost the last few transactions,
+            // and every one of those is re-fetchable from Gmail.
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
+        }
+        let pool = try DatabasePool(path: dir.appendingPathComponent("mail.sqlite").path,
+                                    configuration: config)
         return try AppDatabase(pool)
     }
 
@@ -128,6 +144,141 @@ public final class AppDatabase: Sendable {
                 t.column("size", .integer).notNull()
                 t.primaryKey(["accountId", "messageId", "partId"])
             }
+        }
+        m.registerMigration("v3") { db in
+            try db.execute(sql: "ALTER TABLE outbox ADD COLUMN quotedText TEXT NOT NULL DEFAULT ''")
+            try db.execute(sql: "ALTER TABLE outbox ADD COLUMN quotedHTML TEXT")
+            try db.execute(sql: "ALTER TABLE outbox ADD COLUMN draftMessageId TEXT NOT NULL DEFAULT ''")
+        }
+        m.registerMigration("v4") { db in
+            try db.execute(sql: "ALTER TABLE account ADD COLUMN backfillPageToken TEXT")
+            // Old builds only backfilled 90 days / 500 threads and then set
+            // backfillDone. Reopen backfill so the full history gets pulled;
+            // existing threads just re-upsert as pages reach them.
+            try db.execute(sql: "UPDATE account SET backfillDone = 0")
+        }
+        m.registerMigration("v5") { db in
+            try db.execute(sql: "ALTER TABLE account ADD COLUMN openLabelId TEXT")
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN isOpen BOOLEAN NOT NULL DEFAULT 0")
+        }
+        m.registerMigration("v6") { db in
+            try db.execute(sql: "ALTER TABLE outbox ADD COLUMN bodyHTML TEXT NOT NULL DEFAULT ''")
+        }
+        m.registerMigration("v7") { db in
+            // JSON array of ComposeAttachment (inline images, base64 bytes).
+            try db.execute(sql: "ALTER TABLE outbox ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
+            // Lets a reopened draft match its `cid:` image refs to real parts.
+            try db.execute(sql: "ALTER TABLE attachment ADD COLUMN contentId TEXT NOT NULL DEFAULT ''")
+        }
+        m.registerMigration("v8") { db in
+            // The old index filtered on UNINDEXED fts5 columns, so every
+            // delete was a full scan of the whole index — 130ms measured at
+            // 126k messages, paid once per message plus once per thread on
+            // every store. Keying rows by `message.rowid` makes a delete a
+            // rowid lookup. Contentless as well: nothing reads the columns
+            // back (search joins through to `message`), and the duplicate
+            // copy of every body was ~460MB of the file.
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE message_fts_v2 USING fts5(
+                    subject, sender, recipients, body,
+                    content='', contentless_delete=1
+                )
+                """)
+            try db.execute(sql: """
+                INSERT INTO message_fts_v2 (rowid, subject, sender, recipients, body)
+                SELECT m.rowid, f.subject, f.sender, f.recipients, f.body
+                FROM message_fts f
+                JOIN message m ON m.accountId = f.accountId AND m.id = f.messageId
+                """)
+            try db.execute(sql: "DROP TABLE message_fts")
+            try db.execute(sql: "ALTER TABLE message_fts_v2 RENAME TO message_fts")
+
+            // The sidebar badge re-counts on every write; without this it
+            // scanned all 93k thread rows each time.
+            try db.execute(sql: """
+                CREATE INDEX index_thread_on_open_unread ON thread(isOpen) WHERE isUnread = 1
+                """)
+
+            // Fingerprint of the thread as last stored, so a re-sync that
+            // finds nothing changed can skip the write entirely instead of
+            // rewriting every message body and re-indexing them.
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN syncSig TEXT NOT NULL DEFAULT ''")
+
+            // Recipient autocomplete used to LIKE-scan every message (144ms
+            // per keystroke). Senders are a few thousand rows, kept current
+            // as mail is stored.
+            try db.create(table: "contact") { t in
+                t.primaryKey("email", .text)      // lowercased
+                t.column("name", .text).notNull()
+                t.column("lastSeen", .datetime).notNull()
+            }
+            // Bare fromName is the one from the MAX(date) row — guaranteed
+            // by SQLite for a min/max aggregate.
+            try db.execute(sql: """
+                INSERT INTO contact (email, name, lastSeen)
+                SELECT lower(fromEmail), fromName, MAX(date) FROM message
+                WHERE fromEmail <> '' GROUP BY lower(fromEmail)
+                """)
+        }
+        m.registerMigration("v9") { db in
+            // `attachment.contentId` was added to the v7 migration after v7
+            // had already run here: the identifier was recorded, so the ALTER
+            // never happened, and every attachment row then failed to decode.
+            // That took out the whole thread-detail observation — any thread
+            // with an attachment rendered a subject and an empty pane.
+            if try !db.columns(in: "attachment").contains(where: { $0.name == "contentId" }) {
+                try db.execute(sql: "ALTER TABLE attachment ADD COLUMN contentId TEXT NOT NULL DEFAULT ''")
+            }
+        }
+        m.registerMigration("v10") { db in
+            // Attachments stored before v9 landed have no Content-ID, so the
+            // `cid:` image references in those bodies can't resolve. Flag the
+            // threads that actually reference one — `repairInlineImagesPass`
+            // re-fetches them in the background and clears the flag as it goes.
+            // Default 1: rows written from here on are already correct, and
+            // MailThread doesn't encode this column, so inserts take the
+            // default and updates leave it alone.
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN cidRepaired BOOLEAN NOT NULL DEFAULT 1")
+            try db.execute(sql: """
+                UPDATE thread SET cidRepaired = 0
+                WHERE EXISTS (
+                    SELECT 1 FROM message m
+                    WHERE m.accountId = thread.accountId AND m.threadId = thread.id
+                      AND m.bodyHTML LIKE '%cid:%'
+                )
+                """)
+        }
+        m.registerMigration("v11") { db in
+            // Inline images with an empty filename were skipped entirely when
+            // a thread was stored, so those parts have no attachment row at
+            // all — a `cid:` reference to one still dead-ends even on threads
+            // the v10 pass already "repaired". Flag them again; the same
+            // background pass re-fetches and now keeps the nameless parts.
+            try db.execute(sql: """
+                UPDATE thread SET cidRepaired = 0
+                WHERE EXISTS (
+                    SELECT 1 FROM message m
+                    WHERE m.accountId = thread.accountId AND m.threadId = thread.id
+                      AND m.bodyHTML LIKE '%cid:%'
+                )
+                """)
+        }
+        m.registerMigration("v12") { db in
+            // Per-account color, picked by hand. NULL keeps the account on the
+            // built-in palette, which is where every existing one starts.
+            try db.execute(sql: "ALTER TABLE account ADD COLUMN colorHex TEXT")
+            // Avatars are looked up by address, and the thread row only kept
+            // participants as a display string. Backfill from the messages
+            // already stored so the pictures show up without waiting for
+            // every thread to be re-synced.
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN lastSenderEmail TEXT NOT NULL DEFAULT ''")
+            try db.execute(sql: """
+                UPDATE thread SET lastSenderEmail = COALESCE((
+                    SELECT m.fromEmail FROM message m
+                    WHERE m.accountId = thread.accountId AND m.threadId = thread.id
+                    ORDER BY m.date DESC LIMIT 1
+                ), '')
+                """)
         }
         return m
     }

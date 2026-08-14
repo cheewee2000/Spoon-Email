@@ -34,6 +34,17 @@ public struct GmailClient: Sendable {
         return try await request(path: path, method: "POST", query: [], body: body)
     }
 
+    func put<T: Decodable>(_ path: String, json: [String: Any]) async throws -> T {
+        let body = try JSONSerialization.data(withJSONObject: json)
+        return try await request(path: path, method: "PUT", query: [], body: body)
+    }
+
+    /// DELETE with no response body expected.
+    func delete(_ path: String) async throws {
+        struct Nothing: Decodable {}
+        let _: Nothing = try await request(path: path, method: "DELETE", query: [], body: nil)
+    }
+
     private func request<T: Decodable>(path: String, method: String,
                                        query: [URLQueryItem], body: Data?) async throws -> T {
         var comps = URLComponents(string: Self.base + path)!
@@ -58,7 +69,9 @@ public struct GmailClient: Sendable {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             switch code {
             case 200...299:
-                return try JSONDecoder().decode(T.self, from: data)
+                // DELETE (and some modify calls) return an empty body.
+                let payload = data.isEmpty ? Data("{}".utf8) : data
+                return try JSONDecoder().decode(T.self, from: payload)
             case 401 where attempt <= 2:
                 forceRefresh = true
             case 403, 429, 500...599:

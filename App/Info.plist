@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Xcode merges the INFOPLIST_KEY_* build settings into this file, so
+	     only the keys that have no INFOPLIST_KEY_ equivalent live here.
+	     Both are ignored on macOS. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.cwandt.spoon.refresh</string>
+	</array>
+</dict>
+</plist>
