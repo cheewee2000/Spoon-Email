@@ -8,6 +8,11 @@ struct RootView: View {
     @StateObject private var listModel = ThreadListModel()
     @StateObject private var order = SidebarOrder()
     @AppStorage("sidebarExpanded") private var sidebarExpanded = false
+    /// Native split-view collapse (toolbar chevron / drag-to-hide). Tracked
+    /// here because the board <-> mailbox swap builds a fresh split view each
+    /// time, which would otherwise reset the sidebar to visible.
+    @AppStorage("sidebarHidden") private var sidebarHidden = false
+    @State private var columns = NavigationSplitViewVisibility.automatic
     @State private var searchText = ""
     @FocusState private var searchFocused: Bool
     #if os(macOS)
@@ -18,7 +23,7 @@ struct RootView: View {
         Group {
             #if os(macOS)
             if model.mailbox == nil {
-                NavigationSplitView {
+                NavigationSplitView(columnVisibility: $columns) {
                     sidebar
                 } detail: {
                     BoardView(order: order)
@@ -44,12 +49,17 @@ struct RootView: View {
         .onAppear {
             installKeyMonitor()
             model.startBackfillIfNeeded()
+            #if os(macOS)
+            columns = desiredColumns
+            #endif
         }
         // macOS only: the phone's pages each hold their own list, and this
         // would restart a query on every swipe.
         #if os(macOS)
         .onChange(of: model.mailbox) {
             searchText = ""
+            // The swap just built a fresh split view — re-impose the collapse.
+            columns = desiredColumns
             // Board: nothing to observe, and nothing to clear either — the
             // full-width list keeps its last mailbox for when we come back.
             guard let mailbox = model.mailbox else { return }
@@ -66,6 +76,10 @@ struct RootView: View {
             } else {
                 listModel.observeSearch(db: model.db, query: searchText)
             }
+        }
+        .onChange(of: columns) {
+            // The user dragged or toggled the sidebar — remember their choice.
+            sidebarHidden = (columns == .detailOnly || columns == .doubleColumn)
         }
         .onChange(of: model.focusSearchRequest) {
             // ⌘F on the board opens Unified, and that search field doesn't
@@ -134,9 +148,15 @@ struct RootView: View {
         }
     }
 
+    /// What the current layout should show when the sidebar is hidden: the
+    /// board is two columns (sidebar + detail), a mailbox is three.
+    private var desiredColumns: NavigationSplitViewVisibility {
+        sidebarHidden ? (model.mailbox == nil ? .detailOnly : .doubleColumn) : .all
+    }
+
     /// One mailbox, full width: the list beside the conversation.
     private var mailboxWindow: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             sidebar
         } content: {
             ThreadListView(listModel: listModel, selection: $model.selectedThread,
