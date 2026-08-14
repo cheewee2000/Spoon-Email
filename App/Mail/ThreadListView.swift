@@ -120,12 +120,29 @@ struct ThreadListView: View {
 extension View {
     /// Makes this row the triage-hotkey target while the pointer is over it —
     /// applied to rows in both the full-width list and the board columns.
-    /// The onChange keeps the captured snapshot fresh when the row re-renders
-    /// under a stationary cursor (e.g. `u` flipping isUnread); without it a
-    /// second keystroke would act on the pre-toggle flags.
     func hotkeyHoverTarget(_ thread: MailThread, model: AppModel) -> some View {
-        self
+        modifier(HotkeyHoverTarget(thread: thread, model: model))
+    }
+}
+
+/// Tracks the pointer per row: publishes the row to AppModel as the hotkey
+/// target and tints it so you can see which row a keystroke will hit. The
+/// onChange keeps the captured snapshot fresh when the row re-renders under
+/// a stationary cursor (e.g. `u` flipping isUnread); without it a second
+/// keystroke would act on the pre-toggle flags.
+private struct HotkeyHoverTarget: ViewModifier {
+    let thread: MailThread
+    let model: AppModel
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.primary.opacity(hovering ? 0.06 : 0))
+            )
             .onHover { inside in
+                hovering = inside
                 if inside {
                     model.hoveredThread = thread
                 } else if model.hoveredThread?.key == thread.key {
