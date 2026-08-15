@@ -417,8 +417,17 @@ enum ThreadHTML {
     /// like they were designed for, regardless of app theme.
     private static func frameDoc(_ html: String) -> String {
         """
+        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
         <style>
-          /* height:auto keeps the measurement content-driven. A newsletter
+          /* The doctype above matters: without one the frame is in quirks
+             mode, where `height:100%` on anything in <body> resolves against
+             the viewport — the frame — even with body at height:auto, and
+             the frame and its content grow each other forever. The email's
+             own doctype can't do this job because it lands after this
+             <style> and is ignored. XHTML Transitional (almost-standards,
+             what most email is authored against) rather than <!DOCTYPE html>
+             so sliced-image tables keep their no-gap layout.
+             height:auto keeps the measurement content-driven. A newsletter
              that sets html/body to 100% would otherwise stretch to whatever
              the frame currently is, and sizing the frame from that grows it
              without bound. */
@@ -428,6 +437,13 @@ enum ThreadHTML {
           blockquote { border-left: 2px solid #ccc; margin: 8px 0; padding-left: 10px; color: #555; }
         </style>
         \(pinViewportUnits(html))
+        <style>
+          /* Repeated AFTER the email on purpose. Plenty of templates ship
+             `html,body{height:100%!important}`; at equal specificity and
+             importance the later rule wins, and the email's <style> comes
+             after the one above. Last word goes here. */
+          html, body { height: auto !important; min-height: 0 !important; max-height: none !important; }
+        </style>
         """
     }
 
