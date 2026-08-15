@@ -427,8 +427,31 @@ enum ThreadHTML {
           img { max-width: 100% !important; height: auto !important; }
           blockquote { border-left: 2px solid #ccc; margin: 8px 0; padding-left: 10px; color: #555; }
         </style>
-        \(html)
+        \(pinViewportUnits(html))
         """
+    }
+
+    /// `100vh` and friends resolve against the iframe, and the iframe is sized
+    /// to its content — so a hero block set to a viewport height grows the
+    /// frame, which grows the block, forever. Real clients render into a
+    /// fixed viewport; pin the units to one (600px tall) so they behave.
+    private static let viewportHeightUnit = try? NSRegularExpression(
+        pattern: "(\\d*\\.?\\d+)\\s*(?:vh|svh|lvh|dvh|vmax|vb)\\b", options: [.caseInsensitive])
+
+    static func pinViewportUnits(_ html: String) -> String {
+        guard let viewportHeightUnit else { return html }
+        let ns = html as NSString
+        var out = ""
+        var cursor = 0
+        for m in viewportHeightUnit.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            guard let v = Double(ns.substring(with: m.range(at: 1))) else { continue }
+            out += ns.substring(with: NSRange(location: cursor, length: m.range.location - cursor))
+            out += String(format: "%.0fpx", v * 6)
+            cursor = m.range.location + m.range.length
+        }
+        guard cursor > 0 else { return html }
+        out += ns.substring(from: cursor)
+        return out
     }
 
     /// Every `cid:` reference in a body, lowercased and percent-decoded, so
