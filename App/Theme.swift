@@ -109,6 +109,27 @@ enum CWT {
             ?? .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
+    #if os(iOS)
+    /// UIKit-drawn chrome — navigation titles, bar buttons, the search
+    /// field — doesn't take SwiftUI's environment font. Set it once here.
+    static func applyAppearance() {
+        let regular = UIFont(name: regularFace, size: 15) ?? .monospacedSystemFont(ofSize: 15, weight: .regular)
+        let title = UIFont(name: boldFace, size: 15) ?? .monospacedSystemFont(ofSize: 15, weight: .bold)
+        let large = UIFont(name: boldFace, size: 28) ?? .monospacedSystemFont(ofSize: 28, weight: .bold)
+        let nav = UINavigationBar.appearance()
+        nav.titleTextAttributes = [.font: title]
+        nav.largeTitleTextAttributes = [.font: large]
+        let bar = UIBarButtonItem.appearance()
+        for state in [UIControl.State.normal, .highlighted, .disabled] {
+            bar.setTitleTextAttributes([.font: regular], for: state)
+        }
+        UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self]).font =
+            UIFont(name: regularFace, size: 14) ?? regular
+        UILabel.appearance(whenContainedInInstancesOf: [UISearchBar.self]).font =
+            UIFont(name: regularFace, size: 14) ?? regular
+    }
+    #endif
+
     // MARK: Helpers
 
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {

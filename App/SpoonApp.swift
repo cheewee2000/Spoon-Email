@@ -8,6 +8,9 @@ struct SpoonApp: App {
     init() {
         CWT.registerFonts()
         #if os(iOS)
+        CWT.applyAppearance()
+        #endif
+        #if os(iOS)
         // Registration has to land before launch finishes, and this runs in
         // background launches too — where no scene is ever created.
         BackgroundRefresh.register()
