@@ -345,6 +345,9 @@ struct RootView: View {
                 model.block(t, wholeDomain: true)
             })
         }
+        actions.append(PaletteAction("Google Client ID…", systemImage: "key") {
+            model.showClientSetup = true
+        })
         actions.append(PaletteAction("Manage Blocked Senders", systemImage: "hand.raised") {
             model.showBlocked = true
         })
@@ -427,6 +430,7 @@ struct RootView: View {
                                 order: order,
                                 accountColor: model.accountColor,
                                 addAccount: model.addAccount,
+                                showClientSetup: { model.showClientSetup = true },
                                 defaultComposeId: model.defaultComposeAccount?.id,
                                 setDefaultCompose: model.setDefaultComposeAccount,
                                 setColor: model.setAccountColor)
@@ -525,6 +529,7 @@ struct AccountsSection: View {
     @ObservedObject var order: SidebarOrder
     let accountColor: (String) -> Color
     let addAccount: () -> Void
+    let showClientSetup: () -> Void
     /// The address new mail leaves from — resolved, so it's marked even when
     /// nothing was pinned and the first account is standing in.
     let defaultComposeId: String?
@@ -607,6 +612,11 @@ struct AccountsSection: View {
             // Not draggable — it isn't a destination, it's the way to make one.
             .moveDisabled(true)
             .railTitle("Add Account…")
+            .contextMenu {
+                // The bundled client only admits our test users; this is the
+                // door for everyone else.
+                Button("Use Your Own Google Client ID…") { showClientSetup() }
+            }
         }
     }
 }

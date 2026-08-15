@@ -3,7 +3,7 @@
 A fast, keyboard-first Gmail client for macOS and iOS in the spirit of Superhuman.
 Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
-**Version 0.14.0**
+**Version 0.14.1**
 
 ![Spoon Email screenshot](Screenshot%202026-08-12%20at%208.10.49%20AM.png)
 
@@ -20,9 +20,14 @@ Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
 ## Getting started
 
-Spoon Email talks to the Gmail API with **your own** free Google OAuth client, so
-your mail never flows through anyone else's infrastructure. The first time you
-click **Add Account**, Spoon Email walks you through the one-time setup (~5 min):
+Spoon Email talks to the Gmail API directly with a Google OAuth client — your
+mail never flows through anyone else's infrastructure. The app ships with CW&T's
+client ID, which Google keeps in Testing mode: it only admits addresses on our
+test-user list, so if you're one of those, just click **Add Account** and sign in.
+
+Everyone else uses their own free client (right-click / long-press
+**Add Account…** → **Use Your Own Google Client ID…**, or ⌘K → "Google Client
+ID…"). One-time setup, ~5 min:
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create a
    new project (any name, e.g. `spoon`).
@@ -33,7 +38,8 @@ click **Add Account**, Spoon Email walks you through the one-time setup (~5 min)
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID** →
    Application type **iOS** → Bundle ID `com.cwandt.spoon` → Create.
 5. Copy the **client ID** (looks like `1234-abc.apps.googleusercontent.com`) and
-   paste it into the setup sheet in the app.
+   paste it into the setup sheet in the app. (A native client ID isn't a secret —
+   PKCE, no client secret — which is why ours can live in this repo.)
 
 No verification review is needed while the OAuth client stays in Testing mode.
 

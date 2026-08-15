@@ -16,9 +16,10 @@ struct ClientSetupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Connect Spoon Email to Gmail")
+            Text("Google OAuth client")
                 .font(CWT.title)
-            Text("Spoon Email talks to Gmail with your own free Google OAuth client — your mail never touches anyone else's server. One-time setup, about 5 minutes:")
+            Text("Spoon Email ships with CW&T's Google client, which only works for addresses on our test-user list. Anyone else can use their own free client — your mail never touches anyone else's server either way. One-time setup, about 5 minutes:")
+                .font(CWT.font(12))
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
                 step(1, "Open [console.cloud.google.com](https://console.cloud.google.com) and create a project (any name).")
@@ -37,6 +38,13 @@ struct ClientSetupSheet: View {
                 .textInputAutocapitalization(.never)
                 #endif
             HStack(spacing: 8) {
+                if Config.usesCustomClientID {
+                    Button("Use CW&T's Client") {
+                        Config.setGoogleClientID("")
+                        clientID = Config.googleClientID
+                    }
+                    .buttonStyle(.textAction(CWT.ink2))
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.square)
