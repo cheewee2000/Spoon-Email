@@ -332,6 +332,7 @@ struct RootView: View {
             ("Go to Sent", .sent, "paperplane"),
             ("Go to Archived", .archived, "archivebox"),
             ("Go to Blocked", .blocked, "hand.raised"),
+            ("Go to Spam", .spam, "xmark.bin"),
         ]
         for (title, box, icon) in boxes {
             actions.append(PaletteAction(title, systemImage: icon) { model.mailbox = box })

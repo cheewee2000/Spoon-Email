@@ -57,6 +57,9 @@ struct ThreadListView: View {
             if listModel.threads.isEmpty {
                 if searchQuery != nil {
                     ContentUnavailableView.search
+                } else if listModel.filter == .spam {
+                    ContentUnavailableView("No Spam", systemImage: "xmark.bin",
+                                           description: Text("Gmail's spam folder is empty."))
                 } else if listModel.filter == .blocked {
                     ContentUnavailableView(
                         "Nothing Blocked",

@@ -16,12 +16,16 @@ public struct Account: Codable, Sendable, Identifiable, Hashable, FetchableRecor
     /// The color this account wears through the app, as "#RRGGBB". Unset
     /// means the account takes its slot in the built-in palette instead.
     public var colorHex: String?
+    /// Whether the one-time pull of the Gmail spam folder has run. Regular
+    /// backfill never sees spam (threads.list skips it), so it's fetched once
+    /// by label; anything landing there afterwards arrives via history.
+    public var spamSynced: Bool
 
     public init(id: String = UUID().uuidString, email: String, displayName: String = "",
                 historyId: String? = nil, lastSyncAt: Date? = nil, sortOrder: Int = 0,
                 backfillDone: Bool = false, includeInUnified: Bool = true,
                 backfillPageToken: String? = nil, openLabelId: String? = nil,
-                colorHex: String? = nil) {
+                colorHex: String? = nil, spamSynced: Bool = false) {
         self.id = id
         self.email = email
         self.displayName = displayName
@@ -33,6 +37,7 @@ public struct Account: Codable, Sendable, Identifiable, Hashable, FetchableRecor
         self.backfillPageToken = backfillPageToken
         self.openLabelId = openLabelId
         self.colorHex = colorHex
+        self.spamSynced = spamSynced
     }
 }
 

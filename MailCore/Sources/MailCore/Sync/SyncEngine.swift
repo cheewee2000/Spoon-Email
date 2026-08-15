@@ -93,10 +93,37 @@ public actor SyncEngine {
             let acct = ((try? await db.writer.read { [id = account.id] db in
                 try Account.fetchOne(db, key: id)
             }) ?? nil) ?? account
-            guard !acct.backfillDone else { continue }
+            guard !acct.backfillDone || !acct.spamSynced else { continue }
             backfillingAccounts.insert(acct.id)
             defer { backfillingAccounts.remove(acct.id) }
-            try? await continueBackfill(account: acct)
+            if !acct.spamSynced {
+                try? await catchUpSpam(account: acct)
+            }
+            if !acct.backfillDone {
+                try? await continueBackfill(account: acct)
+            }
+        }
+    }
+
+    /// One-time pull of the spam folder. `threads.list` leaves spam out
+    /// unless asked, so backfill never brings it in; Gmail also purges spam
+    /// after 30 days, so this is a page or two, not a second backfill.
+    private func catchUpSpam(account: Account) async throws {
+        let client = GmailClient(accountId: account.id, tokens: tokens)
+        var pageToken: String? = nil
+        repeat {
+            let page = try await client.listThreads(labelIds: [GmailLabels.spam],
+                                                    pageToken: pageToken,
+                                                    includeSpamTrash: true)
+            for stub in page.threads ?? [] {
+                if let g = try? await client.getThread(stub.id) {
+                    try await store(gThread: g, accountId: account.id)
+                }
+            }
+            pageToken = page.nextPageToken
+        } while pageToken != nil
+        try await db.writer.write { [id = account.id] db in
+            try db.execute(sql: "UPDATE account SET spamSynced = 1 WHERE id = ?", arguments: [id])
         }
     }
 

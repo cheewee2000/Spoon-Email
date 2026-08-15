@@ -12,6 +12,7 @@ public enum MailboxFilter: Hashable, Sendable {
     case drafts
     case archived
     case blocked
+    case spam
     case account(String)
 
     public var title: String {
@@ -26,6 +27,7 @@ public enum MailboxFilter: Hashable, Sendable {
         case .drafts: return "Drafts"
         case .archived: return "Archived"
         case .blocked: return "Blocked"
+        case .spam: return "Spam"
         case .account: return "Inbox"
         }
     }
@@ -104,6 +106,9 @@ public enum MailboxFilter: Hashable, Sendable {
                 ) f ON f.accountId = t.accountId AND f.threadId = t.id
                 \(order)
                 """)
+        case .spam:
+            return try MailThread.fetchAll(db, sql: "SELECT t.* \(plainJoin) \(order)",
+                                           arguments: [GmailLabels.spam])
         case .account(let id):
             return try MailThread.fetchAll(
                 db, sql: "SELECT t.* \(plainJoin) WHERE t.accountId = ? AND t.isOpen = 0 \(order)",

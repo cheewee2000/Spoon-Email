@@ -7,7 +7,7 @@ import MailCore
 /// persisted in the saved order, so don't rename cases.
 enum SidebarItem: String, CaseIterable, Identifiable {
     case unified, important, newsletters, updates, other
-    case open, drafts, sent, archived, blocked
+    case open, drafts, sent, archived, blocked, spam
 
     var id: String { rawValue }
 
@@ -23,6 +23,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .sent: "Sent"
         case .archived: "Archived"
         case .blocked: "Blocked"
+        case .spam: "Spam"
         }
     }
 
@@ -38,6 +39,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .sent: "paperplane"
         case .archived: "archivebox"
         case .blocked: "hand.raised"
+        case .spam: "xmark.bin"
         }
     }
 
@@ -53,6 +55,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .sent: .sent
         case .archived: .archived
         case .blocked: .blocked
+        case .spam: .spam
         }
     }
 }
@@ -78,6 +81,7 @@ final class SidebarOrder: ObservableObject {
     private let hiddenKey = "boardHiddenItems"
     private let widthsKey = "boardColumnWidths"
     private let blockedHiddenKey = "boardHidBlockedOnce"
+    private let spamHiddenKey = "boardHidSpamOnce"
     private let defaults = UserDefaults.standard
 
     init() {
@@ -93,6 +97,12 @@ final class SidebarOrder: ObservableObject {
             hidden.insert(.blocked)
             defaults.set(hidden.map(\.rawValue), forKey: hiddenKey)
             defaults.set(true, forKey: blockedHiddenKey)
+        }
+        // Same for Spam: worth a look now and then, not a column.
+        if !defaults.bool(forKey: spamHiddenKey) {
+            hidden.insert(.spam)
+            defaults.set(hidden.map(\.rawValue), forKey: hiddenKey)
+            defaults.set(true, forKey: spamHiddenKey)
         }
         widths = defaults.dictionary(forKey: widthsKey) as? [String: Double] ?? [:]
     }

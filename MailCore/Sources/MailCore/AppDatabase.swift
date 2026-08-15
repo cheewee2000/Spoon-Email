@@ -280,6 +280,9 @@ public final class AppDatabase: Sendable {
                 ), '')
                 """)
         }
+        m.registerMigration("v13") { db in
+            try db.execute(sql: "ALTER TABLE account ADD COLUMN spamSynced BOOLEAN NOT NULL DEFAULT 0")
+        }
         return m
     }
 }

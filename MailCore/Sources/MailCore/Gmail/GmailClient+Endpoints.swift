@@ -2,8 +2,10 @@ import Foundation
 
 public extension GmailClient {
     func listThreads(q: String? = nil, labelIds: [String] = [],
-                     maxResults: Int = 100, pageToken: String? = nil) async throws -> GThreadList {
+                     maxResults: Int = 100, pageToken: String? = nil,
+                     includeSpamTrash: Bool = false) async throws -> GThreadList {
         var query: [URLQueryItem] = [.init(name: "maxResults", value: String(maxResults))]
+        if includeSpamTrash { query.append(.init(name: "includeSpamTrash", value: "true")) }
         if let q { query.append(.init(name: "q", value: q)) }
         for l in labelIds { query.append(.init(name: "labelIds", value: l)) }
         if let pageToken { query.append(.init(name: "pageToken", value: pageToken)) }
