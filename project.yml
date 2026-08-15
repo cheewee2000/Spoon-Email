@@ -10,7 +10,7 @@ packages:
     path: MailCore
 settings:
   base:
-    MARKETING_VERSION: 0.13.3
+    MARKETING_VERSION: 0.14.0
     CURRENT_PROJECT_VERSION: 1
     # Swift 5 language mode: GRDB 6 ValueObservation closures crash under
     # Swift 6 dynamic actor-isolation checking (they run on DB queues).
@@ -23,8 +23,12 @@ targets:
       - path: App
         excludes:
           - Info.plist
+          - Spoon-iOS.entitlements
+      - path: Shared
     dependencies:
       - package: MailCore
+      - target: SpoonWidgets
+        platformFilter: iOS
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cwandt.spoon
@@ -44,3 +48,36 @@ targets:
         INFOPLIST_KEY_NSContactsUsageDescription: "Shows the photo your address book already has for the people who write to you."
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         SWIFT_STRICT_CONCURRENCY: minimal
+        # App Group for the widget snapshot — iOS only; the Mac build has no
+        # widgets and no provisioning for the group.
+        CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: App/Spoon-iOS.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: App/Spoon-iOS.entitlements
+  SpoonWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+        excludes:
+          - SpoonWidgets.entitlements
+      - path: Shared
+      - path: App/Fonts
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: Spoon Email
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        UIAppFonts:
+          - SpaceMono-Regular.ttf
+          - SpaceMono-Bold.ttf
+    entitlements:
+      path: Widgets/SpoonWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.cwandt.spoon]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cwandt.spoon.widgets
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: L6DVQR8JB9
+        SWIFT_STRICT_CONCURRENCY: minimal
+        SKIP_INSTALL: YES

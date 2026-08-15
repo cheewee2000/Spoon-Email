@@ -36,6 +36,10 @@ enum AccountPalette {
     static func defaultColor(index: Int) -> Color {
         swatches[index % 6].color
     }
+
+    static func defaultHex(index: Int) -> String {
+        swatches[index % 6].hex
+    }
 }
 
 extension Color {

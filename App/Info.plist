@@ -5,6 +5,17 @@
 	<!-- Xcode merges the INFOPLIST_KEY_* build settings into this file, so
 	     only the keys that have no INFOPLIST_KEY_ equivalent live here.
 	     Both are ignored on macOS. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.cwandt.spoon</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>spoon</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

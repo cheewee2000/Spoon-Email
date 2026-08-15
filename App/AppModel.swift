@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if os(iOS)
+import WidgetKit
+#endif
 import GRDB
 import MailCore
 #if os(macOS)
@@ -126,7 +129,50 @@ final class AppModel: ObservableObject {
             } onChange: { [weak self] count in
                 self?.openUnreadCount = count
             }
+        #if os(iOS)
+        startWidgetSnapshots()
+        #endif
     }
+
+    #if os(iOS)
+    private var widgetCancellable: AnyDatabaseCancellable?
+
+    /// Keeps the home-screen widget's snapshot current: re-fetched whenever
+    /// the threads it shows (or the two counts) change, written to the App
+    /// Group container, and the widget told to redraw.
+    private func startWidgetSnapshots() {
+        widgetCancellable = ValueObservation
+            .tracking { db -> (Int, Int, [MailThread]) in
+                let unified = try Int.fetchOne(db, sql: """
+                    SELECT COUNT(*) FROM thread t
+                    JOIN account a ON a.id = t.accountId AND a.includeInUnified = 1
+                    JOIN thread_label tl ON tl.accountId = t.accountId AND tl.threadId = t.id AND tl.labelId = ?
+                    WHERE t.isOpen = 0 AND t.isUnread = 1
+                    """, arguments: [GmailLabels.inbox]) ?? 0
+                let open = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM thread WHERE isOpen = 1 AND isUnread = 1") ?? 0
+                let threads = try MailboxFilter.unified.fetch(db, limit: 8)
+                return (unified, open, threads)
+            }
+            .removeDuplicates { $0 == $1 }
+            .start(in: db.writer, scheduling: .async(onQueue: .main)) { _ in
+            } onChange: { [weak self] unified, open, threads in
+                guard let self else { return }
+                let accounts = self.accountStore.accounts
+                let items = threads.map { t in
+                    let idx = accounts.firstIndex { $0.id == t.accountId } ?? 0
+                    let hex = accounts.indices.contains(idx) ? accounts[idx].colorHex : nil
+                    return WidgetSnapshot.Item(
+                        accountId: t.accountId, threadId: t.id, participants: t.participants,
+                        subject: t.subject, snippet: t.snippet, lastDate: t.lastDate,
+                        isUnread: t.isUnread, isOpen: t.isOpen,
+                        colorHex: hex ?? AccountPalette.defaultHex(index: idx))
+                }
+                WidgetSnapshotStore.save(WidgetSnapshot(generatedAt: .now, unifiedUnread: unified,
+                                                        openUnread: open, threads: items))
+                WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.widgetKind)
+            }
+    }
+    #endif
 
     private func pushAccountEmails() async {
         let emails = Dictionary(uniqueKeysWithValues: accountStore.accounts.map { ($0.id, $0.email) })

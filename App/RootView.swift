@@ -150,6 +150,20 @@ struct RootView: View {
                 .padding(.bottom, 16)
             }
         }
+        // Widget taps: spoon://mailbox/<name> or spoon://thread/<account>/<id>.
+        .onOpenURL { url in
+            guard url.scheme == SpoonURL.scheme else { return }
+            let parts = url.pathComponents.filter { $0 != "/" }
+            switch url.host {
+            case "mailbox":
+                model.mailbox = .unified
+            case "thread" where parts.count == 2:
+                model.mailbox = .unified
+                model.openThread(accountId: parts[0], threadId: parts[1])
+            default:
+                break
+            }
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active {
                 model.syncNow()
