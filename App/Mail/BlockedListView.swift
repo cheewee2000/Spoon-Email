@@ -9,39 +9,37 @@ struct BlockedListView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Blocked Senders & Domains")
-                    .font(.headline)
+                Text("Blocked senders & domains")
+                    .font(CWT.title)
                 Spacer()
                 Button("Done") { dismiss() }
+                    .buttonStyle(.square)
                     .keyboardShortcut(.escape, modifiers: [])
             }
             .padding(12)
-            Divider()
+            Hairline()
             if rules.isEmpty {
-                ContentUnavailableView(
-                    "Nothing Blocked",
-                    systemImage: "hand.raised",
-                    description: Text("Block a sender or domain from a message's ••• menu.")
-                )
-                .frame(maxHeight: .infinity)
+                EmptyState(title: "Nothing blocked",
+                           detail: "Block a sender or domain from a message's More menu.")
             } else {
                 List(rules) { rule in
-                    HStack {
-                        Image(systemName: rule.kind == "domain" ? "globe" : "person.slash")
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Tag(text: rule.kind == "domain" ? "DOMAIN" : "SENDER",
+                            color: CWT.ink3, inverted: false)
                         Text(rule.pattern)
+                            .font(CWT.font(12))
                         Spacer()
-                        Button {
+                        Button("×") {
                             model.unblock(rule)
                             rules.removeAll { $0.id == rule.id }
-                        } label: {
-                            Image(systemName: "xmark.circle")
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.textAction(CWT.ink2))
                         .help("Unblock")
                     }
+                    .listRowSeparatorTint(CWT.hairline)
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
         #if os(macOS)

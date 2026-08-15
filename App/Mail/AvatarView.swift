@@ -20,16 +20,17 @@ struct AvatarView: View {
                 ZStack {
                     Self.tint(for: email.isEmpty ? name : email)
                     Text(Self.initials(name: name, email: email))
-                        .font(.system(size: size * 0.4, weight: .semibold))
+                        .font(CWT.font(size * 0.38, bold: true))
                         .foregroundStyle(.white)
                 }
             }
         }
         .frame(width: size, height: size)
-        .clipShape(Circle())
+        .clipShape(Rectangle())
         // Icons come back on transparent or white grounds in every mix; the
-        // hairline keeps them from bleeding into the row.
-        .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+        // hairline keeps them from bleeding into the row. Square, like every
+        // other photograph in the system.
+        .overlay(Rectangle().strokeBorder(CWT.hairline, lineWidth: 1))
         .task(id: email) {
             data = nil
             guard !email.isEmpty else { return }
@@ -59,8 +60,10 @@ struct AvatarView: View {
         return Int(hash % 360)
     }
 
+    /// Muted: a material grey with a hint of hue, so a list of fallbacks
+    /// reads as steel, brass and graphite rather than a paint chart.
     static func tint(for key: String) -> Color {
-        Color(hue: Double(hue(for: key)) / 360, saturation: 0.55, brightness: 0.65)
+        Color(hue: Double(hue(for: key)) / 360, saturation: 0.22, brightness: 0.52)
     }
 
     private static func image(from data: Data) -> Image? {

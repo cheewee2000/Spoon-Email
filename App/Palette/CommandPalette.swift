@@ -39,7 +39,7 @@ struct CommandPalette: View {
         VStack(spacing: 0) {
             TextField("Type a command…", text: $query)
                 .textFieldStyle(.plain)
-                .font(.title3)
+                .font(CWT.font(15))
                 .padding(14)
                 .focused($focused)
                 .onSubmit { runHighlighted() }
@@ -51,7 +51,7 @@ struct CommandPalette: View {
                     highlighted = max(highlighted - 1, 0)
                     return .handled
                 }
-            Divider()
+            Hairline()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -60,20 +60,20 @@ struct CommandPalette: View {
                                 run(action)
                             } label: {
                                 HStack {
-                                    Image(systemName: action.systemImage)
-                                        .frame(width: 22)
                                     Text(action.title)
+                                        .font(CWT.font(12))
                                     Spacer()
                                     if let s = action.shortcut {
                                         Text(s)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .font(CWT.caption)
+                                            .foregroundStyle(idx == highlighted ? CWT.paper.opacity(0.7) : CWT.ink3)
                                     }
                                 }
+                                .foregroundStyle(idx == highlighted ? CWT.paper : CWT.ink)
                                 .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
+                                .padding(.vertical, 7)
                                 .contentShape(Rectangle())
-                                .background(idx == highlighted ? Color.accentColor.opacity(0.2) : .clear)
+                                .background(idx == highlighted ? CWT.ink : .clear)
                             }
                             .buttonStyle(.plain)
                             .id(idx)
@@ -87,8 +87,8 @@ struct CommandPalette: View {
             }
         }
         .frame(width: 480)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .shadow(radius: 20)
+        .background(CWT.paper)
+        .overlay(Rectangle().strokeBorder(CWT.hairline, lineWidth: 1))
         .onAppear {
             focused = true
         }

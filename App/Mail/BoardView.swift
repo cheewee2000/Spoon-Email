@@ -29,22 +29,16 @@ struct BoardView: View {
         }
         .overlay {
             if order.boardItems.isEmpty {
-                ContentUnavailableView(
-                    "No Columns",
-                    systemImage: "rectangle.split.3x1",
-                    description: Text("Right-click a mailbox in the sidebar to show it here.")
-                )
+                EmptyState(title: "No columns",
+                           detail: "Right-click a mailbox in the sidebar to show it here.")
             }
         }
         .navigationTitle("All Mailboxes")
         .toolbar {
             ToolbarItem {
-                Button {
-                    model.compose()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .help("Compose (C)")
+                Button("Compose") { model.compose() }
+                    .buttonStyle(.textAction)
+                    .help("Compose (C)")
             }
         }
     }
@@ -101,7 +95,7 @@ private struct ColumnResizer: View {
 
     private var rule: some View {
         Rectangle()
-            .fill(active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.separator))
+            .fill(active ? CWT.ink : CWT.hairline)
             .frame(width: active ? 2 : 1)
     }
 }
@@ -119,45 +113,41 @@ private struct BoardColumn: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Hairline()
             threads
         }
+        .background(CWT.paper)
         .onAppear { list.observe(db: model.db, filter: item.filter) }
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: item.systemImage)
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            SectionLabel(text: item.code)
             Text(item.title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(CWT.font(12, bold: true))
             Spacer(minLength: 4)
             if item == .open, model.openUnreadCount > 0 {
-                Text("\(model.openUnreadCount)")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.red, in: Capsule())
+                Tag(text: "\(model.openUnreadCount)")
             }
             Text("\(list.threads.count)")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .font(CWT.font(11))
+                .foregroundStyle(CWT.ink3)
                 .monospacedDigit()
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .background(isDropTarget ? Color.accentColor.opacity(0.25) : Color.clear)
+        .background(isDropTarget ? CWT.selection : CWT.paperWarm)
         .contentShape(Rectangle())
         // The header is the column's own title bar: click it to open this
         // mailbox full-width, drag it to move the column.
         .onTapGesture { model.mailbox = item.filter }
         .help("Open \(item.title) — drag to reorder")
         .draggable(item.rawValue) {
-            Label(item.title, systemImage: item.systemImage)
+            Text(item.title)
+                .font(CWT.font(12))
                 .padding(6)
+                .background(CWT.paper)
         }
         .dropDestination(for: String.self) { ids, _ in
             // Anything but one of our own headers — a stray text drag from
@@ -197,7 +187,7 @@ private struct BoardColumn: View {
                         }
                     }
                     .hotkeyHoverTarget(thread, model: model)
-                    Divider().opacity(0.5)
+                    Hairline()
                 }
             }
         }
@@ -211,8 +201,8 @@ private struct BoardColumn: View {
         .overlay {
             if list.threads.isEmpty {
                 Text("Nothing here")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(CWT.caption)
+                    .foregroundStyle(CWT.ink3)
             }
         }
     }

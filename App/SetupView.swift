@@ -17,7 +17,7 @@ struct ClientSetupSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Connect Spoon Email to Gmail")
-                .font(.title2).bold()
+                .font(CWT.title)
             Text("Spoon Email talks to Gmail with your own free Google OAuth client — your mail never touches anyone else's server. One-time setup, about 5 minutes:")
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
@@ -28,20 +28,24 @@ struct ClientSetupSheet: View {
                 step(5, "Copy the client ID and paste it here:")
             }
             TextField("1234-abc.apps.googleusercontent.com", text: $clientID)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.callout, design: .monospaced))
+                .textFieldStyle(.plain)
+                .font(CWT.font(12))
+                .padding(8)
+                .overlay(Rectangle().strokeBorder(CWT.hairline, lineWidth: 1))
                 .autocorrectionDisabled()
                 #if !os(macOS)
                 .textInputAutocapitalization(.never)
                 #endif
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
                 Button("Cancel") { dismiss() }
+                    .buttonStyle(.square)
                 Button("Save & Sign In") {
                     Config.setGoogleClientID(clientID)
                     dismiss()
                     model.addAccount()
                 }
+                .buttonStyle(.squarePrimary)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isValid)
             }
@@ -55,14 +59,13 @@ struct ClientSetupSheet: View {
 
     private func step(_ n: Int, _ text: LocalizedStringKey) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("\(n)")
-                .font(.caption.bold())
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(Color.accentColor.opacity(0.15)))
+            Text("\(n).")
+                .font(CWT.font(12, bold: true))
+                .frame(width: 20, alignment: .trailing)
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.callout)
+        .font(CWT.font(12))
     }
 }
 
@@ -74,22 +77,22 @@ struct WelcomeView: View {
 
     var body: some View {
         if store.accounts.isEmpty {
-            VStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 14) {
                 Image("Logo")
                     .resizable()
-                    .frame(width: 56, height: 56)
+                    .frame(width: 40, height: 40)
                 Text("Spoon Email")
-                    .font(.largeTitle).bold()
+                    .font(CWT.display)
                 Text("A fast, keyboard-first Gmail client.\nConnect a Google account to begin.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                Button("Add Google Account…", action: addAccount)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .font(CWT.font(12))
+                    .foregroundStyle(CWT.ink2)
+                Button("Add Google Account →", action: addAccount)
+                    .buttonStyle(.squarePrimary)
                     .padding(.top, 8)
             }
+            .frame(maxWidth: 480, alignment: .leading)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background()
+            .background(CWT.paper)
         }
     }
 }

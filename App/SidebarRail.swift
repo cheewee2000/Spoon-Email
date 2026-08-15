@@ -27,19 +27,21 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
+    /// Three-letter code, the way CW&T tags everything (`CWT_HSM4PW4`):
+    /// what the collapsed rail and column headers show instead of an icon.
+    var code: String {
         switch self {
-        case .unified: "tray.full"
-        case .important: "star"
-        case .newsletters: "newspaper"
-        case .updates: "bell"
-        case .other: "tray"
-        case .open: "clock"
-        case .drafts: "doc.badge.ellipsis"
-        case .sent: "paperplane"
-        case .archived: "archivebox"
-        case .blocked: "hand.raised"
-        case .spam: "xmark.bin"
+        case .unified: "UNI"
+        case .important: "IMP"
+        case .newsletters: "NWS"
+        case .updates: "UPD"
+        case .other: "OTH"
+        case .open: "OPN"
+        case .drafts: "DRF"
+        case .sent: "SNT"
+        case .archived: "ARC"
+        case .blocked: "BLK"
+        case .spam: "SPM"
         }
     }
 
@@ -231,8 +233,7 @@ private struct RailTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(hovering ? Color.primary.opacity(0.10) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6))
+            .background(hovering ? CWT.hover : Color.clear)
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
             .anchorPreference(key: RailHoverKey.self, value: .bounds) { anchor in
@@ -254,15 +255,12 @@ extension View {
                 if let target {
                     let rect = proxy[target.anchor]
                     Text(target.title)
-                        .font(.callout)
+                        .font(CWT.font(12))
+                        .foregroundStyle(CWT.paper)
                         .lineLimit(1)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 7).strokeBorder(.quaternary)
-                        }
-                        .shadow(radius: 6, y: 2)
+                        .background(CWT.ink)
                         .fixedSize()
                         .offset(x: rect.maxX + 8, y: rect.midY - 14)
                 }
@@ -274,11 +272,12 @@ extension View {
 
 // MARK: - Rail row
 
-/// One destination in the rail: icon only and named on hover when collapsed,
-/// icon beside its name when expanded.
+/// One destination in the rail: a short code (or a colored dot for an
+/// account) named on hover when collapsed, code beside its name when
+/// expanded. Text and glyphs, no icons — see `CWT`.
 struct RailIcon: View {
     let title: String
-    let systemImage: String
+    let glyph: String
     var tint: Color?
     var badge: Int = 0
     /// Small marker trailing the row — the pencil that flags the account new
@@ -286,10 +285,10 @@ struct RailIcon: View {
     var trailingSymbol: String?
     @Environment(\.railExpanded) private var expanded
 
-    init(_ title: String, systemImage: String, tint: Color? = nil, badge: Int = 0,
+    init(_ title: String, glyph: String, tint: Color? = nil, badge: Int = 0,
          trailingSymbol: String? = nil) {
         self.title = title
-        self.systemImage = systemImage
+        self.glyph = glyph
         self.tint = tint
         self.badge = badge
         self.trailingSymbol = trailingSymbol
@@ -304,7 +303,7 @@ struct RailIcon: View {
 
     private var labeled: some View {
         HStack(spacing: 8) {
-            icon.imageScale(.large).frame(width: 22)
+            icon.frame(width: 26, alignment: .leading)
             // Addresses are the long ones, and their tail — the domain — is
             // what tells two accounts apart, so trim from the middle.
             Text(title)
@@ -319,7 +318,6 @@ struct RailIcon: View {
 
     private var iconOnly: some View {
         icon
-            .imageScale(.large)
             .frame(maxWidth: .infinity, minHeight: 22)
             .overlay(alignment: .topTrailing) {
                 if badge > 0 {
@@ -334,27 +332,22 @@ struct RailIcon: View {
     }
 
     private func marker(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.secondary)
+        Text(symbol)
+            .font(CWT.font(9))
+            .foregroundStyle(CWT.ink3)
     }
 
     private var badgeLabel: some View {
-        Text("\(badge)")
-            .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(Color.red, in: Capsule())
+        Tag(text: "\(badge)")
     }
 
     // Only accounts carry a tint; everything else lets the list color its own
-    // symbol, so a selected row still flips to white on the highlight.
+    // text, so a selected row still flips on the highlight.
     @ViewBuilder private var icon: some View {
         if let tint {
-            Image(systemName: systemImage).foregroundStyle(tint)
+            Text(glyph).font(CWT.font(13)).foregroundStyle(tint)
         } else {
-            Image(systemName: systemImage)
+            Text(glyph).font(CWT.font(10, bold: true)).tracking(CWT.labelTracking)
         }
     }
 }

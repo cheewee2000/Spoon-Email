@@ -56,7 +56,7 @@ struct ComposeView: View {
         VStack(spacing: 0) {
             Grid(alignment: .leading, verticalSpacing: 6) {
                 GridRow {
-                    Text("From").foregroundStyle(.secondary)
+                    SectionLabel(text: "From")
                         .frame(width: Self.labelWidth, alignment: .trailing)
                         .gridColumnAlignment(.trailing)
                     if isBoundToAccount {
@@ -76,7 +76,7 @@ struct ComposeView: View {
                     }
                 }
                 GridRow {
-                    Text("To").foregroundStyle(.secondary)
+                    SectionLabel(text: "To")
                         .frame(width: Self.labelWidth, alignment: .trailing)
                     TextField("", text: $draft.to)
                         .textFieldStyle(.plain)
@@ -98,18 +98,17 @@ struct ComposeView: View {
                                     applySuggestion(s)
                                 } label: {
                                     Text("\(s.name) <\(s.email)>")
-                                        .font(.caption)
+                                        .font(CWT.caption)
                                         .lineLimit(1)
                                 }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.blue)
+                                .buttonStyle(.textAction(CWT.ink2))
                             }
                         }
                     }
                 }
                 if showCcBcc {
                     GridRow {
-                        Text("Cc").foregroundStyle(.secondary)
+                        SectionLabel(text: "Cc")
                             .frame(width: Self.labelWidth, alignment: .trailing)
                         TextField("", text: $draft.cc)
                             .textFieldStyle(.plain)
@@ -117,7 +116,7 @@ struct ComposeView: View {
                             .focused($focus, equals: .cc)
                     }
                     GridRow {
-                        Text("Bcc").foregroundStyle(.secondary)
+                        SectionLabel(text: "Bcc")
                             .frame(width: Self.labelWidth, alignment: .trailing)
                         TextField("", text: $draft.bcc)
                             .textFieldStyle(.plain)
@@ -127,14 +126,12 @@ struct ComposeView: View {
                 } else {
                     GridRow {
                         Color.clear.frame(width: Self.labelWidth, height: 0)
-                        Button("Add Cc/Bcc") { showCcBcc = true }
-                            .buttonStyle(.plain)
-                            .font(.caption)
-                            .foregroundStyle(.blue)
+                        Button("+ Cc/Bcc") { showCcBcc = true }
+                            .buttonStyle(.textAction(CWT.ink3))
                     }
                 }
                 GridRow {
-                    Text("Subject").foregroundStyle(.secondary)
+                    SectionLabel(text: "Subject")
                         .frame(width: Self.labelWidth, alignment: .trailing)
                     TextField("", text: $draft.subject)
                         .textFieldStyle(.plain)
@@ -143,13 +140,14 @@ struct ComposeView: View {
                 }
             }
             .padding(12)
-            Divider()
+            .background(CWT.paperWarm)
+            Hairline()
             formatBar
-            Divider()
+            Hairline()
             RichTextEditor(text: $richBody, controller: rich)
                 .focused($focus, equals: .body)
             if draft.quotedHTML != nil || !draft.quotedText.isEmpty {
-                Divider()
+                Hairline()
                 DisclosureGroup(isExpanded: $showQuoted) {
                     Group {
                         if let html = draft.quotedHTML {
@@ -158,7 +156,7 @@ struct ComposeView: View {
                             ScrollView {
                                 Text(draft.quotedText)
                                     .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(CWT.ink2)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(8)
                             }
@@ -167,47 +165,60 @@ struct ComposeView: View {
                     .frame(height: 180)
                 } label: {
                     Text("Quoted message — included below your reply")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(CWT.caption)
+                        .foregroundStyle(CWT.ink2)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
             }
-            Divider()
+            Hairline()
             if let dropError {
                 Text(dropError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(CWT.caption)
+                    .foregroundStyle(CWT.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
             }
-            HStack {
+            HStack(spacing: 8) {
                 Button("Cancel") { close() }
+                    .buttonStyle(.textAction(CWT.ink2))
                     .keyboardShortcut(.escape, modifiers: [])
                     .help("Cancel (Esc)")
-                Button("Save Draft") {
+                Button("Save draft") {
                     captureBody()
                     model.saveDraft(draft)
                     close()
                 }
+                .buttonStyle(.textAction(CWT.ink2))
+                .padding(.leading, 8)
                 .keyboardShortcut("s", modifiers: .command)
                 .help("Save Draft (⌘S)")
                 Spacer()
-                Menu("Send Later") {
+                Menu {
                     Button("In 1 Hour") { sendAt(Date().addingTimeInterval(3600)) }
                     Button("Tonight 8 PM") { sendAt(next(hour: 20)) }
                     Button("Tomorrow 9 AM") { sendAt(next(hour: 9, forceTomorrow: true)) }
+                } label: {
+                    Text("Send later ↓")
+                        .font(CWT.font(12))
+                        .foregroundStyle(CWT.ink)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .overlay(Rectangle().strokeBorder(CWT.hairline, lineWidth: 1))
                 }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Schedule the send")
-                Button("Send") { sendAt(nil) }
+                Button("Send →") { sendAt(nil) }
                     .keyboardShortcut(.return, modifiers: .command)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.squarePrimary)
                     .disabled(draft.to.trimmingCharacters(in: .whitespaces).isEmpty)
                     .help("Send (⌘Return)")
             }
             .padding(12)
+            .background(CWT.paperWarm)
         }
         #if os(macOS)
         .frame(minWidth: 560, minHeight: 440)
@@ -217,14 +228,15 @@ struct ComposeView: View {
         }
         .overlay {
             if isDropTargeted {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6]))
-                    .background(Color.accentColor.opacity(0.06))
+                Rectangle()
+                    .strokeBorder(CWT.ink, style: StrokeStyle(lineWidth: 1, dash: [4]))
+                    .background(CWT.ink.opacity(0.04))
                     .overlay(
                         Text("Drop image to insert")
-                            .font(.caption)
+                            .font(CWT.caption)
+                            .foregroundStyle(CWT.paper)
                             .padding(6)
-                            .background(.thinMaterial, in: Capsule())
+                            .background(CWT.ink)
                     )
                     .allowsHitTesting(false)
                     .padding(4)
@@ -245,43 +257,50 @@ struct ComposeView: View {
     /// Rich-text formatting for the body. The editor also takes the standard
     /// system shortcuts, so these are the discoverable version.
     private var formatBar: some View {
-        HStack(spacing: 4) {
-            Button { rich.toggleBold() } label: { Image(systemName: "bold") }
+        HStack(spacing: 14) {
+            Button { rich.toggleBold() } label: { Text("B").bold() }
                 .keyboardShortcut("b", modifiers: .command)
                 .help("Bold (⌘B)")
-            Button { rich.toggleItalic() } label: { Image(systemName: "italic") }
+            Button("I") { rich.toggleItalic() }
                 .keyboardShortcut("i", modifiers: .command)
                 .help("Italic (⌘I)")
-            Button { rich.toggleUnderline() } label: { Image(systemName: "underline") }
+            Button { rich.toggleUnderline() } label: { Text("U").underline() }
                 .keyboardShortcut("u", modifiers: .command)
                 .help("Underline (⌘U)")
-            Button { rich.toggleStrikethrough() } label: { Image(systemName: "strikethrough") }
+            Button { rich.toggleStrikethrough() } label: { Text("S").strikethrough() }
                 .help("Strikethrough")
-            Divider().frame(height: 14)
-            Button { linkURL = ""; showLinkPrompt = true } label: { Image(systemName: "link") }
+            Hairline(axis: .vertical).frame(height: 14)
+            Button("Link") { linkURL = ""; showLinkPrompt = true }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
                 .help("Add Link (⇧⌘K)")
-            Button { rich.clearFormatting() } label: { Image(systemName: "eraser") }
+            Button("Clear") { rich.clearFormatting() }
                 .help("Clear formatting from the selection")
             Spacer()
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.textAction(CWT.ink2))
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .popover(isPresented: $showLinkPrompt) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Link URL").font(.caption).foregroundStyle(.secondary)
+                SectionLabel(text: "Link URL")
                 TextField("https://", text: $linkURL)
+                    .textFieldStyle(.plain)
+                    .font(CWT.font(12))
+                    .padding(6)
+                    .overlay(Rectangle().strokeBorder(CWT.hairline, lineWidth: 1))
                     .frame(width: 260)
                     .onSubmit { applyLink() }
-                HStack {
+                HStack(spacing: 8) {
                     Spacer()
                     Button("Cancel") { showLinkPrompt = false }
+                        .buttonStyle(.square)
                     Button("Add") { applyLink() }
+                        .buttonStyle(.squarePrimary)
                         .keyboardShortcut(.defaultAction)
                 }
             }
             .padding(12)
+            .cwtChrome()
         }
     }
 

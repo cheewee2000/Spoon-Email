@@ -19,7 +19,7 @@ final class ComposeWindowHost: NSObject, NSWindowDelegate {
     var onWindowClosed: (() -> Void)?
 
     func show<Content: View>(_ content: Content, title: String) {
-        let hosting = NSHostingController(rootView: content)
+        let hosting = NSHostingController(rootView: content.cwtChrome())
         if let window {
             window.contentViewController = hosting
             window.title = title

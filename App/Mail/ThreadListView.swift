@@ -26,13 +26,14 @@ struct ThreadListView: View {
             ForEach(listModel.threads, id: \.key) { thread in
                 ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
                     .tag(thread.key)
+                    .listRowSeparatorTint(CWT.hairline)
                     .swipeActions(edge: .trailing) {
                         Button {
                             model.archive(thread)
                         } label: {
                             Label("Archive", systemImage: "archivebox")
                         }
-                        .tint(.green)
+                        .tint(CWT.green)
                     }
                     .contextMenu {
                         Button("Archive") { model.archive(thread) }
@@ -50,40 +51,31 @@ struct ThreadListView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(CWT.paper)
         .onKeyPress(phases: .down) { press in
             handleKey(press)
         }
         .overlay {
             if listModel.threads.isEmpty {
                 if searchQuery != nil {
-                    ContentUnavailableView.search
+                    EmptyState(title: "No results", detail: "Nothing on this Mac matches.")
                 } else if listModel.filter == .spam {
-                    ContentUnavailableView("No Spam", systemImage: "xmark.bin",
-                                           description: Text("Gmail's spam folder is empty."))
+                    EmptyState(title: "No spam", detail: "Gmail's spam folder is empty.")
                 } else if listModel.filter == .blocked {
-                    ContentUnavailableView(
-                        "Nothing Blocked",
-                        systemImage: "hand.raised",
-                        description: Text("Block a sender or domain from a message's ••• menu.")
-                    )
+                    EmptyState(title: "Nothing blocked",
+                               detail: "Block a sender or domain from a message's More menu.")
                 } else {
-                    ContentUnavailableView(
-                        "Inbox Zero",
-                        systemImage: "checkmark.circle",
-                        description: Text("Nothing here.")
-                    )
+                    EmptyState(title: "Inbox zero", detail: "Nothing here.")
                 }
             }
         }
         .safeAreaInset(edge: .bottom) {
             if let query = searchQuery {
-                Button {
+                Button("Search Gmail for older mail ↓") {
                     model.serverSearch(query)
-                } label: {
-                    Label("Search Gmail for older mail", systemImage: "icloud.and.arrow.down")
-                        .font(.caption)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.square)
                 .padding(6)
             }
         }
@@ -140,10 +132,7 @@ private struct HotkeyHoverTarget: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.primary.opacity(hovering ? 0.06 : 0))
-            )
+            .background(hovering ? CWT.hover : Color.clear)
             .onHover { inside in
                 hovering = inside
                 if inside {
@@ -166,12 +155,12 @@ struct ThreadRow: View {
         HStack(alignment: .top, spacing: 8) {
             // Account accent: every row carries its account's color so
             // mail from different accounts is tellable at a glance.
-            RoundedRectangle(cornerRadius: 1.5)
-                .fill(accountColor.opacity(0.8))
-                .frame(width: 3)
-            Circle()
+            Rectangle()
+                .fill(accountColor)
+                .frame(width: 2)
+            Rectangle()
                 .fill(thread.isUnread ? accountColor : .clear)
-                .frame(width: 8, height: 8)
+                .frame(width: 6, height: 6)
                 .padding(.top, 5)
             AvatarView(name: thread.participants,
                        email: thread.lastSenderEmail,
@@ -180,44 +169,42 @@ struct ThreadRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(thread.participants.isEmpty ? "(unknown)" : thread.participants)
-                        .font(.system(size: 13, weight: thread.isUnread ? .bold : .regular))
-                        .foregroundStyle(thread.isUnread ? accountColor : .primary)
+                        .font(CWT.font(12, bold: thread.isUnread))
+                        .foregroundStyle(CWT.ink)
                         .lineLimit(1)
                     if thread.messageCount > 1 {
                         Text("\(thread.messageCount)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .font(CWT.font(10))
+                            .foregroundStyle(CWT.ink3)
                     }
                     if thread.hasDraft {
                         // A word-sized badge crowded out the sender on every
                         // row in Drafts, where every row has one; the dot says
                         // the same thing at a glance.
-                        Circle()
-                            .fill(.orange)
-                            .frame(width: 5, height: 5)
+                        Tag(text: "DRAFT", color: CWT.orange, inverted: false)
                             .help("Unsent draft")
                     }
                     Spacer()
                     if thread.hasAttachments {
-                        Image(systemName: "paperclip")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                        Tag(text: "ATT", color: CWT.ink3, inverted: false)
                     }
                     if thread.isStarred {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.yellow)
+                        Text("★")
+                            .font(CWT.font(11))
+                            .foregroundStyle(CWT.orange)
                     }
                     Text(Self.relativeDate(thread.lastDate))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(CWT.font(10))
+                        .foregroundStyle(CWT.ink3)
+                        .monospacedDigit()
                 }
                 Text(thread.subject)
-                    .font(.system(size: 12, weight: thread.isUnread ? .semibold : .regular))
+                    .font(CWT.font(12, bold: thread.isUnread))
+                    .foregroundStyle(CWT.ink)
                     .lineLimit(1)
                 Text(thread.snippet)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .font(CWT.font(11))
+                    .foregroundStyle(CWT.ink2)
                     .lineLimit(2)
             }
         }

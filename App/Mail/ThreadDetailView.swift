@@ -16,82 +16,58 @@ struct ThreadDetailView: View {
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(thread.subject)
-                        .font(.headline)
+                        .font(CWT.font(14, bold: true))
                         .lineLimit(2)
                     Text(model.accountEmail(thread.accountId))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(CWT.caption)
+                        .foregroundStyle(CWT.ink3)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                HStack {
-                    Button {
-                        model.reply(to: thread, all: false)
-                    } label: {
-                        Image(systemName: "arrowshape.turn.up.left")
+                // Actions are words, not icons. Hover fades them; the ones
+                // that carry state (Open, Star) go bold when on.
+                HStack(spacing: 14) {
+                    Button("Reply") { model.reply(to: thread, all: false) }
+                        .help("Reply (R)")
+                    Button("Reply all") { model.reply(to: thread, all: true) }
+                        .help("Reply All (A)")
+                    Button("Forward") { model.forward(thread) }
+                        .help("Forward (F)")
+                    Button(thread.isOpen ? "Open ●" : "Open") { model.toggleOpen(thread) }
+                        .help(thread.isOpen ? "Remove from Open (O)" : "Mark Open (O) — awaiting reply / act later")
+                    Button(thread.isStarred ? "★" : "☆") { model.toggleStar(thread) }
+                        .buttonStyle(.textAction(thread.isStarred ? CWT.orange : CWT.ink))
+                        .help("Star (S)")
+                    Button("Unread") { model.markRead(thread, read: false) }
+                        .help("Mark Unread (U)")
+                    Button("Archive") { model.archive(thread) }
+                        .help("Archive (E)")
+                    if canUnsubscribe {
+                        Button("Unsubscribe") { model.beginUnsubscribe(thread) }
+                            .help("Unsubscribe from this sender")
                     }
-                    .help("Reply (R)")
-                    Button {
-                        model.reply(to: thread, all: true)
-                    } label: {
-                        Image(systemName: "arrowshape.turn.up.left.2")
-                    }
-                    .help("Reply All (A)")
-                    Button {
-                        model.forward(thread)
-                    } label: {
-                        Image(systemName: "arrowshape.turn.up.right")
-                    }
-                    .help("Forward (F)")
-                    Button {
-                        model.toggleOpen(thread)
-                    } label: {
-                        Image(systemName: thread.isOpen ? "clock.fill" : "clock")
-                    }
-                    .help(thread.isOpen ? "Remove from Open (O)" : "Mark Open (O) — awaiting reply / act later")
-                    Button {
-                        model.toggleStar(thread)
-                    } label: {
-                        Image(systemName: thread.isStarred ? "star.fill" : "star")
-                    }
-                    .help("Star (S)")
-                    Button {
-                        model.markRead(thread, read: false)
-                    } label: {
-                        Image(systemName: "envelope.badge")
-                    }
-                    .help("Mark Unread (U)")
-                    Button {
-                        model.archive(thread)
-                    } label: {
-                        Image(systemName: "archivebox")
-                    }
-                    .help("Archive (E)")
-                    Button {
-                        model.beginUnsubscribe(thread)
-                    } label: {
-                        Image(systemName: "envelope.arrow.triangle.branch")
-                    }
-                    .disabled(!canUnsubscribe)
-                    .help(canUnsubscribe
-                          ? "Unsubscribe from this sender"
-                          : "No unsubscribe link in this message")
                     Menu {
                         Button("Block Sender", role: .destructive) { model.block(thread, wholeDomain: false) }
                         Button("Block Domain", role: .destructive) { model.block(thread, wholeDomain: true) }
                         Divider()
                         Button("Manage Blocked…") { model.showBlocked = true }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Text("More ↓")
+                            .font(CWT.font(12))
+                            .foregroundStyle(CWT.ink)
                     }
                     .help("More… (⌘K opens the command palette)")
                     .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
                     .fixedSize()
                     Spacer()
                 }
+                .buttonStyle(.textAction)
+                .padding(.top, 4)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
+            .padding(.vertical, 10)
+            .background(CWT.paper)
+            Hairline()
             MessageWebView(
                 html: detail.html,
                 onAttachment: { messageId, partId in
@@ -199,7 +175,7 @@ enum ThreadHTML {
             } else {
                 let hue = AvatarView.hue(for: key.isEmpty ? m.fromName : key)
                 avatar = """
-                <span class="ava mono" style="background:hsl(\(hue),55%,55%)">\
+                <span class="ava mono" style="background:hsl(\(hue),22%,52%)">\
                 \(escape(AvatarView.initials(name: m.fromName, email: m.fromEmail)))</span>
                 """
             }
@@ -227,47 +203,59 @@ enum ThreadHTML {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="color-scheme" content="light dark">
         <style>
-          :root { color-scheme: light dark; }
-          body { font: 13px -apple-system, sans-serif; margin: 0; padding: 0 0 40px; }
-          .msg { padding: 12px 16px; border-bottom: 1px solid rgba(128,128,128,0.25); }
-          .msg.draft .hdr { border-left: 3px solid #e5a50a; padding-left: 44px; }
+          \(fontFaces)
+          /* CW&T chrome: paper + ink, Space Mono, hairlines, no rounding.
+             The message bodies inside the iframes keep their own styling. */
+          :root { color-scheme: light dark;
+                  --paper: #ffffff; --ink: #111111; --ink2: #4a4a4a; --ink3: #8a8a8a;
+                  --hairline: #e3e3e3; --red: #d11d1d; --orange: #e35a1e; }
+          @media (prefers-color-scheme: dark) {
+            :root { --paper: #111111; --ink: #f6f5f2; --ink2: #b0b0b0; --ink3: #7a7a7a;
+                    --hairline: #2a2a2a; }
+          }
+          body { font: 12px "Space Mono", "JetBrains Mono", Menlo, "Courier New", monospace;
+                 margin: 0; padding: 0 0 40px; background: var(--paper); color: var(--ink);
+                 line-height: 1.5; }
+          .msg { padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
+          .msg.draft .hdr { border-left: 2px solid var(--orange); padding-left: 44px; }
           .msg.draft .ava { left: 8px; }
           /* The avatar is pulled out of the flow so the address, recipients
              and peek lines all hang off the same left edge under the name. */
           .hdr { margin-bottom: 10px; cursor: pointer; position: relative;
                  padding-left: 36px; min-height: 28px; }
           .ava { position: absolute; left: 0; top: 0; width: 28px; height: 28px;
-                 border-radius: 50%; object-fit: cover;
-                 box-shadow: 0 0 0 0.5px rgba(128,128,128,0.4); }
+                 object-fit: cover; border: 1px solid var(--hairline); box-sizing: border-box; }
           .ava.mono { display: flex; align-items: center; justify-content: center;
-                      color: #fff; font-size: 11px; font-weight: 600; box-sizing: border-box; }
-          .from { font-weight: 600; }
-          .addr, .date, .to { color: gray; font-size: 12px; }
+                      color: #fff; font-size: 10px; font-weight: 700; }
+          .from { font-weight: 700; }
+          .addr, .date, .to { color: var(--ink3); font-size: 11px; }
           .date { float: right; }
-          .peek { display: none; color: gray; font-size: 12px; margin-top: 2px;
+          .peek { display: none; color: var(--ink2); font-size: 11px; margin-top: 2px;
                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .msg.collapsed .mbody { display: none; }
           .msg.collapsed .peek { display: block; }
           .msg.collapsed .to { display: none; }
-          .badge { background: #e5a50a; color: #fff; font-size: 10px; font-weight: 700;
-                   border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
-          .editbtn { margin-left: 6px; padding: 1px 10px; font-size: 11px; cursor: pointer;
-                     border: 1px solid #e5a50a; border-radius: 10px; background: transparent;
-                     color: #e5a50a; vertical-align: middle; }
-          .delbtn { margin-left: 4px; padding: 1px 10px; font-size: 11px; cursor: pointer;
-                    border: 1px solid #d64541; border-radius: 10px; background: transparent;
-                    color: #d64541; vertical-align: middle; }
+          .badge { background: var(--orange); color: #fff; font-size: 9px; font-weight: 700;
+                   letter-spacing: 0.04em; padding: 1px 4px; margin-left: 6px; vertical-align: middle; }
+          .editbtn, .delbtn { margin-left: 6px; padding: 1px 8px; font-size: 11px; cursor: pointer;
+                     font-family: inherit; background: transparent; vertical-align: middle;
+                     border-radius: 0; }
+          .editbtn { border: 1px solid var(--ink); color: var(--ink); }
+          .delbtn { border: 1px solid var(--red); color: var(--red); }
+          .editbtn:hover, .delbtn:hover, .hdr:hover .from, .chip:hover,
+          details.plainq summary:hover { opacity: 0.55; }
           .chips { margin-bottom: 8px; }
-          .chip { display: inline-block; border: 1px solid rgba(128,128,128,0.4); border-radius: 12px;
-                  padding: 3px 10px; margin: 0 6px 6px 0; font-size: 12px;
+          .chip { display: inline-block; border: 1px solid var(--hairline);
+                  padding: 3px 8px; margin: 0 6px 6px 0; font-size: 11px;
                   text-decoration: none; color: inherit; }
-          .chipsize { color: gray; }
-          .plain { white-space: pre-wrap; overflow-x: auto; }
-          .plain.quoted { color: gray; }
-          details.plainq summary { cursor: pointer; color: gray; list-style: none;
-              display: inline-block; border: 1px solid rgba(128,128,128,0.4);
-              border-radius: 10px; padding: 0 10px; margin: 8px 0; font-size: 12px; }
-          .frame { width: 100%; border: none; height: 120px; background: #fff; border-radius: 4px; }
+          .chipsize { color: var(--ink3); }
+          .plain { white-space: pre-wrap; overflow-x: auto;
+                   font: 13px -apple-system, sans-serif; }
+          .plain.quoted { color: var(--ink3); }
+          details.plainq summary { cursor: pointer; color: var(--ink2); list-style: none;
+              display: inline-block; border: 1px solid var(--hairline);
+              padding: 0 8px; margin: 8px 0; font-size: 11px; }
+          .frame { width: 100%; border: none; height: 120px; background: #fff; }
         </style></head><body>\(sections)
         <script>
         // Links leave the app: hand them to the native side, which opens the
@@ -318,7 +306,7 @@ enum ThreadHTML {
           var btn = d.createElement('button');
           btn.textContent = '•••';
           btn.title = 'Show / hide quoted text';
-          btn.style.cssText = 'margin:8px 0;padding:1px 10px;border:1px solid #ccc;border-radius:10px;background:#f5f5f5;cursor:pointer;font-size:12px;color:#555';
+          btn.style.cssText = 'margin:8px 0;padding:1px 8px;border:1px solid #e3e3e3;border-radius:0;background:transparent;cursor:pointer;font-size:12px;color:#8a8a8a;font-family:inherit';
           first.parentNode.insertBefore(btn, first);
           els.forEach(function (el) { el.style.display = 'none'; });
           btn.addEventListener('click', function (ev) {
@@ -453,6 +441,18 @@ enum ThreadHTML {
     /// fixed viewport; pin the units to one (600px tall) so they behave.
     private static let viewportHeightUnit = try? NSRegularExpression(
         pattern: "(\\d*\\.?\\d+)\\s*(?:vh|svh|lvh|dvh|vmax|vb)\\b", options: [.caseInsensitive])
+
+    /// Space Mono for the conversation chrome, inlined: the web view is its
+    /// own process and can't see fonts registered with the app, and the
+    /// document has no base URL to load them from.
+    static let fontFaces: String = {
+        [("SpaceMono-Regular", 400), ("SpaceMono-Bold", 700)].compactMap { name, weight in
+            guard let url = Bundle.main.url(forResource: name, withExtension: "ttf"),
+                  let data = try? Data(contentsOf: url) else { return nil }
+            return "@font-face { font-family: \"Space Mono\"; font-weight: \(weight); font-style: normal; "
+                + "src: url(data:font/ttf;base64,\(data.base64EncodedString())) format(\"truetype\"); }"
+        }.joined(separator: "\n")
+    }()
 
     static func pinViewportUnits(_ html: String) -> String {
         guard let viewportHeightUnit else { return html }

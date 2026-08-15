@@ -10,22 +10,25 @@ enum AccountPalette {
         let name: String
         let hex: String
         var id: String { hex }
-        var color: Color { Color(hex: hex) ?? .blue }
+        var color: Color { Color(hex: hex) ?? CWT.ink }
     }
 
+    /// CW&T's signal colors first, then the material greys sampled from the
+    /// studio's product photography — steel, titanium, brass, copper,
+    /// graphite, cerakote.
     static let swatches: [Swatch] = [
-        .init(name: "Blue",   hex: "#0A84FF"),
-        .init(name: "Purple", hex: "#BF5AF2"),
-        .init(name: "Orange", hex: "#FF9F0A"),
-        .init(name: "Teal",   hex: "#40C8E0"),
-        .init(name: "Pink",   hex: "#FF6482"),
-        .init(name: "Indigo", hex: "#5E5CE6"),
-        .init(name: "Green",  hex: "#32D74B"),
-        .init(name: "Red",    hex: "#FF453A"),
-        .init(name: "Yellow", hex: "#FFD60A"),
-        .init(name: "Brown",  hex: "#AC8E68"),
-        .init(name: "Mint",   hex: "#66D4CF"),
-        .init(name: "Gray",   hex: "#98989D"),
+        .init(name: "Signal Red",  hex: "#D11D1D"),
+        .init(name: "Cerakote",    hex: "#E35A1E"),
+        .init(name: "Green",       hex: "#2E7D4F"),
+        .init(name: "Copper",      hex: "#B87333"),
+        .init(name: "Brass",       hex: "#B08D57"),
+        .init(name: "Titanium",    hex: "#6E7378"),
+        .init(name: "Steel",       hex: "#8C9296"),
+        .init(name: "Graphite",    hex: "#3C3C3C"),
+        .init(name: "Slate",       hex: "#4F5B66"),
+        .init(name: "Ochre",       hex: "#C79A2A"),
+        .init(name: "Oxblood",     hex: "#7A2E2E"),
+        .init(name: "Ink",         hex: "#111111"),
     ]
 
     /// The color an account with no stored choice wears, by its position in

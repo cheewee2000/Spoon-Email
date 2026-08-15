@@ -6,6 +6,7 @@ struct SpoonApp: App {
     @StateObject private var model = AppModel.shared
 
     init() {
+        CWT.registerFonts()
         #if os(iOS)
         // Registration has to land before launch finishes, and this runs in
         // background launches too — where no scene is ever created.

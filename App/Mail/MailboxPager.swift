@@ -40,7 +40,7 @@ struct MailboxPager: View {
         VStack(spacing: 0) {
             if searchText.isEmpty {
                 pagerBar
-                Divider()
+                Hairline()
                 page
             } else {
                 ThreadPageList(list: searchList, emptyText: "No matches")
@@ -54,11 +54,7 @@ struct MailboxPager: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    model.compose()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
+                Button("Compose") { model.compose() }
             }
         }
         .navigationDestination(for: MailThread.self) { thread in
@@ -66,11 +62,8 @@ struct MailboxPager: View {
         }
         .overlay {
             if items.isEmpty {
-                ContentUnavailableView(
-                    "No Mailboxes",
-                    systemImage: "rectangle.split.3x1",
-                    description: Text("Long-press a mailbox in the sidebar to show it here.")
-                )
+                EmptyState(title: "No mailboxes",
+                           detail: "Long-press a mailbox in the sidebar to show it here.")
             }
         }
     }
@@ -81,9 +74,9 @@ struct MailboxPager: View {
     private var pagerBar: some View {
         VStack(spacing: 5) {
             HStack(spacing: 8) {
-                sideLabel(previousItem, alignment: .leading, chevron: "chevron.left")
+                sideLabel(previousItem, alignment: .leading, chevron: "←")
                 currentLabel
-                sideLabel(nextItem, alignment: .trailing, chevron: "chevron.right")
+                sideLabel(nextItem, alignment: .trailing, chevron: "→")
             }
             .padding(.horizontal, 12)
             dots
@@ -104,20 +97,13 @@ struct MailboxPager: View {
     }
 
     private var currentLabel: some View {
-        HStack(spacing: 5) {
-            Image(systemName: current.systemImage)
-                .imageScale(.small)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            SectionLabel(text: current.code)
             Text(current.title)
-                .font(.system(size: 16, weight: .semibold))
+                .font(CWT.font(15, bold: true))
                 .lineLimit(1)
             if current == .open, model.openUnreadCount > 0 {
-                Text("\(model.openUnreadCount)")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Color.red, in: Capsule())
+                Tag(text: "\(model.openUnreadCount)")
             }
         }
         .frame(maxWidth: .infinity)
@@ -130,21 +116,15 @@ struct MailboxPager: View {
                 Button {
                     move(to: item)
                 } label: {
-                    HStack(spacing: 2) {
-                        if alignment == .leading {
-                            Image(systemName: chevron).imageScale(.small)
-                        }
+                    HStack(spacing: 4) {
+                        if alignment == .leading { Text(chevron) }
                         Text(item.title)
-                            .font(.system(size: 13))
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        if alignment == .trailing {
-                            Image(systemName: chevron).imageScale(.small)
-                        }
+                        if alignment == .trailing { Text(chevron) }
                     }
-                    .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.textAction(CWT.ink2))
             }
         }
         .frame(maxWidth: .infinity, alignment: alignment)
@@ -155,8 +135,8 @@ struct MailboxPager: View {
     private var dots: some View {
         HStack(spacing: 5) {
             ForEach(items) { item in
-                Circle()
-                    .fill(item == current ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary))
+                Rectangle()
+                    .fill(item == current ? CWT.ink : CWT.hairline)
                     .frame(width: 5, height: 5)
             }
         }
@@ -215,13 +195,14 @@ private struct ThreadPageList: View {
                 NavigationLink(value: thread) {
                     ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
                 }
+                .listRowSeparatorTint(CWT.hairline)
                 .swipeActions(edge: .trailing) {
                     Button {
                         model.archive(thread)
                     } label: {
                         Label("Archive", systemImage: "archivebox")
                     }
-                    .tint(.green)
+                    .tint(CWT.green)
                 }
                 .swipeActions(edge: .leading) {
                     Button {
@@ -229,13 +210,13 @@ private struct ThreadPageList: View {
                     } label: {
                         Label(thread.isUnread ? "Read" : "Unread", systemImage: "envelope.badge")
                     }
-                    .tint(.blue)
+                    .tint(CWT.ink)
                     Button {
                         model.toggleOpen(thread)
                     } label: {
                         Label("Open", systemImage: "clock")
                     }
-                    .tint(.orange)
+                    .tint(CWT.orange)
                 }
                 .contextMenu {
                     Button(thread.isStarred ? "Unstar" : "Star") { model.toggleStar(thread) }
@@ -244,6 +225,8 @@ private struct ThreadPageList: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(CWT.paper)
         .refreshable { await model.syncAndWait() }
         .onScrollGeometryChange(for: Bool.self) { geo in
             geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 600
@@ -253,8 +236,8 @@ private struct ThreadPageList: View {
         .overlay {
             if list.threads.isEmpty {
                 Text(emptyText)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(CWT.caption)
+                    .foregroundStyle(CWT.ink3)
             }
         }
     }

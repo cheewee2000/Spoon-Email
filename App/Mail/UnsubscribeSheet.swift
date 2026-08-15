@@ -9,20 +9,19 @@ struct UnsubscribeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundStyle(tint)
+                Tag(text: stateTag, color: tint)
                 Text(title)
-                    .font(.headline)
+                    .font(CWT.title)
             }
 
             Text(session.sender)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(CWT.font(12))
+                .foregroundStyle(CWT.ink2)
                 .textSelection(.enabled)
 
             Text(detail)
-                .font(.callout)
+                .font(CWT.font(12))
+                .foregroundStyle(CWT.ink)
                 .fixedSize(horizontal: false, vertical: true)
 
             if case .working = session.stage {
@@ -30,13 +29,15 @@ struct UnsubscribeSheet: View {
                     .controlSize(.small)
             }
 
-            HStack {
+            Hairline()
+            HStack(spacing: 8) {
                 Spacer()
                 buttons
             }
+            .buttonStyle(.square)
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 400)
     }
 
     @ViewBuilder
@@ -46,6 +47,7 @@ struct UnsubscribeSheet: View {
             Button("Cancel", role: .cancel) { model.dismissUnsubscribe() }
                 .keyboardShortcut(.cancelAction)
             Button("Unsubscribe") { model.confirmUnsubscribe() }
+                .buttonStyle(.squarePrimary)
                 .keyboardShortcut(.defaultAction)
         case .working:
             Button("Cancel", role: .cancel) { model.dismissUnsubscribe() }
@@ -61,6 +63,7 @@ struct UnsubscribeSheet: View {
             Button("Not Now", role: .cancel) { model.dismissUnsubscribe() }
                 .keyboardShortcut(.cancelAction)
             Button("Done — Archive") { model.finishUnsubscribeFromBrowser() }
+                .buttonStyle(.squarePrimary)
                 .keyboardShortcut(.defaultAction)
         case .done:
             Button("Done") { model.dismissUnsubscribe() }
@@ -69,6 +72,7 @@ struct UnsubscribeSheet: View {
             Button("Close", role: .cancel) { model.dismissUnsubscribe() }
                 .keyboardShortcut(.cancelAction)
             Button("Try Again") { model.confirmUnsubscribe() }
+                .buttonStyle(.squarePrimary)
                 .keyboardShortcut(.defaultAction)
         }
     }
@@ -98,19 +102,22 @@ struct UnsubscribeSheet: View {
         }
     }
 
-    private var icon: String {
+    /// Status flag: a word, never an icon.
+    private var stateTag: String {
         switch session.stage {
-        case .done:   return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.triangle.fill"
-        default:      return "envelope.arrow.triangle.branch"
+        case .confirm:        return "LIST"
+        case .working:        return "WORKING"
+        case .browserPending: return "BROWSER"
+        case .done:           return "DONE"
+        case .failed:         return "FAILED"
         }
     }
 
     private var tint: Color {
         switch session.stage {
-        case .done:   return .green
-        case .failed: return .orange
-        default:      return .accentColor
+        case .done:   return CWT.green
+        case .failed: return CWT.red
+        default:      return CWT.ink
         }
     }
 }
