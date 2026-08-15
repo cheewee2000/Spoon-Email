@@ -320,7 +320,10 @@ struct RailIcon: View {
             icon.imageScale(.large).frame(width: 22)
             // Addresses are the long ones, and their tail — the domain — is
             // what tells two accounts apart, so trim from the middle.
+            // The sidebar column is its own hosting context on macOS, so the
+            // window's environment font doesn't reach it — set it here.
             Text(title)
+                .font(CWT.font(12))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)

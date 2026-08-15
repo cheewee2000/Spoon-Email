@@ -422,6 +422,7 @@ struct RootView: View {
         }
         .scrollContentBackground(.hidden)
         .background(CWT.paperWarm)
+        .font(CWT.body)
         .environment(\.railExpanded, sidebarExpanded)
         .navigationTitle("Spoon Email")
         #if os(macOS)
@@ -578,7 +579,7 @@ struct AccountsSection: View {
                 if expanded {
                     HStack(spacing: 8) {
                         Image(systemName: "plus.circle").imageScale(.large).frame(width: 22)
-                        Text("Add Account…")
+                        Text("Add Account…").font(CWT.font(12))
                         Spacer(minLength: 0)
                     }
                     .frame(minHeight: 22)

@@ -3,7 +3,7 @@
 A fast, keyboard-first Gmail client for macOS and iOS in the spirit of Superhuman.
 Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
-**Version 0.13.1**
+**Version 0.13.2**
 
 ![Spoon Email screenshot](Screenshot%202026-08-12%20at%208.10.49%20AM.png)
 
