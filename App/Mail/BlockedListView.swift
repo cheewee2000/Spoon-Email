@@ -19,21 +19,23 @@ struct BlockedListView: View {
             .padding(12)
             Hairline()
             if rules.isEmpty {
-                EmptyState(title: "Nothing blocked",
-                           detail: "Block a sender or domain from a message's More menu.")
+                EmptyState(title: "Nothing blocked", systemImage: "hand.raised",
+                           detail: "Block a sender or domain from a message's ••• menu.")
             } else {
                 List(rules) { rule in
-                    HStack(spacing: 10) {
-                        Tag(text: rule.kind == "domain" ? "DOMAIN" : "SENDER",
-                            color: CWT.ink3, inverted: false)
+                    HStack {
+                        Image(systemName: rule.kind == "domain" ? "globe" : "person.slash")
+                            .foregroundStyle(CWT.ink2)
                         Text(rule.pattern)
                             .font(CWT.font(12))
                         Spacer()
-                        Button("×") {
+                        Button {
                             model.unblock(rule)
                             rules.removeAll { $0.id == rule.id }
+                        } label: {
+                            Image(systemName: "xmark.circle")
                         }
-                        .buttonStyle(.textAction(CWT.ink2))
+                        .buttonStyle(.plain)
                         .help("Unblock")
                     }
                     .listRowSeparatorTint(CWT.hairline)

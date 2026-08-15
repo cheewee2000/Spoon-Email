@@ -54,7 +54,11 @@ struct MailboxPager: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Compose") { model.compose() }
+                Button {
+                    model.compose()
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
             }
         }
         .navigationDestination(for: MailThread.self) { thread in
@@ -62,7 +66,7 @@ struct MailboxPager: View {
         }
         .overlay {
             if items.isEmpty {
-                EmptyState(title: "No mailboxes",
+                EmptyState(title: "No mailboxes", systemImage: "rectangle.split.3x1",
                            detail: "Long-press a mailbox in the sidebar to show it here.")
             }
         }
@@ -74,9 +78,9 @@ struct MailboxPager: View {
     private var pagerBar: some View {
         VStack(spacing: 5) {
             HStack(spacing: 8) {
-                sideLabel(previousItem, alignment: .leading, chevron: "←")
+                sideLabel(previousItem, alignment: .leading, chevron: "chevron.left")
                 currentLabel
-                sideLabel(nextItem, alignment: .trailing, chevron: "→")
+                sideLabel(nextItem, alignment: .trailing, chevron: "chevron.right")
             }
             .padding(.horizontal, 12)
             dots
@@ -98,7 +102,9 @@ struct MailboxPager: View {
 
     private var currentLabel: some View {
         HStack(spacing: 6) {
-            SectionLabel(text: current.code)
+            Image(systemName: current.systemImage)
+                .imageScale(.small)
+                .foregroundStyle(CWT.ink2)
             Text(current.title)
                 .font(CWT.font(15, bold: true))
                 .lineLimit(1)
@@ -116,12 +122,16 @@ struct MailboxPager: View {
                 Button {
                     move(to: item)
                 } label: {
-                    HStack(spacing: 4) {
-                        if alignment == .leading { Text(chevron) }
+                    HStack(spacing: 2) {
+                        if alignment == .leading {
+                            Image(systemName: chevron).imageScale(.small)
+                        }
                         Text(item.title)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        if alignment == .trailing { Text(chevron) }
+                        if alignment == .trailing {
+                            Image(systemName: chevron).imageScale(.small)
+                        }
                     }
                 }
                 .buttonStyle(.textAction(CWT.ink2))

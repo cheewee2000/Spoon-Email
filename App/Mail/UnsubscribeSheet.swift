@@ -9,7 +9,9 @@ struct UnsubscribeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Tag(text: stateTag, color: tint)
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(tint)
                 Text(title)
                     .font(CWT.title)
             }
@@ -102,14 +104,11 @@ struct UnsubscribeSheet: View {
         }
     }
 
-    /// Status flag: a word, never an icon.
-    private var stateTag: String {
+    private var icon: String {
         switch session.stage {
-        case .confirm:        return "LIST"
-        case .working:        return "WORKING"
-        case .browserPending: return "BROWSER"
-        case .done:           return "DONE"
-        case .failed:         return "FAILED"
+        case .done:   return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        default:      return "envelope.arrow.triangle.branch"
         }
     }
 

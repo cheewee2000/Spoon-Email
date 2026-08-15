@@ -23,46 +23,72 @@ struct ThreadDetailView: View {
                         .foregroundStyle(CWT.ink3)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // Actions are words, not icons. Hover fades them; the ones
-                // that carry state (Open, Star) go bold when on.
-                HStack(spacing: 14) {
-                    Button("Reply") { model.reply(to: thread, all: false) }
-                        .help("Reply (R)")
-                    Button("Reply all") { model.reply(to: thread, all: true) }
-                        .help("Reply All (A)")
-                    Button("Forward") { model.forward(thread) }
-                        .help("Forward (F)")
-                    Button(thread.isOpen ? "Open ●" : "Open") { model.toggleOpen(thread) }
-                        .help(thread.isOpen ? "Remove from Open (O)" : "Mark Open (O) — awaiting reply / act later")
-                    Button(thread.isStarred ? "★" : "☆") { model.toggleStar(thread) }
-                        .buttonStyle(.textAction(thread.isStarred ? CWT.orange : CWT.ink))
-                        .help("Star (S)")
-                    Button("Unread") { model.markRead(thread, read: false) }
-                        .help("Mark Unread (U)")
-                    Button("Archive") { model.archive(thread) }
-                        .help("Archive (E)")
-                    if canUnsubscribe {
-                        Button("Unsubscribe") { model.beginUnsubscribe(thread) }
-                            .help("Unsubscribe from this sender")
+                HStack {
+                    Button {
+                        model.reply(to: thread, all: false)
+                    } label: {
+                        Image(systemName: "arrowshape.turn.up.left")
                     }
+                    .help("Reply (R)")
+                    Button {
+                        model.reply(to: thread, all: true)
+                    } label: {
+                        Image(systemName: "arrowshape.turn.up.left.2")
+                    }
+                    .help("Reply All (A)")
+                    Button {
+                        model.forward(thread)
+                    } label: {
+                        Image(systemName: "arrowshape.turn.up.right")
+                    }
+                    .help("Forward (F)")
+                    Button {
+                        model.toggleOpen(thread)
+                    } label: {
+                        Image(systemName: thread.isOpen ? "clock.fill" : "clock")
+                    }
+                    .help(thread.isOpen ? "Remove from Open (O)" : "Mark Open (O) — awaiting reply / act later")
+                    Button {
+                        model.toggleStar(thread)
+                    } label: {
+                        Image(systemName: thread.isStarred ? "star.fill" : "star")
+                            .foregroundStyle(thread.isStarred ? CWT.orange : CWT.ink)
+                    }
+                    .help("Star (S)")
+                    Button {
+                        model.markRead(thread, read: false)
+                    } label: {
+                        Image(systemName: "envelope.badge")
+                    }
+                    .help("Mark Unread (U)")
+                    Button {
+                        model.archive(thread)
+                    } label: {
+                        Image(systemName: "archivebox")
+                    }
+                    .help("Archive (E)")
+                    Button {
+                        model.beginUnsubscribe(thread)
+                    } label: {
+                        Image(systemName: "envelope.arrow.triangle.branch")
+                    }
+                    .disabled(!canUnsubscribe)
+                    .help(canUnsubscribe
+                          ? "Unsubscribe from this sender"
+                          : "No unsubscribe link in this message")
                     Menu {
                         Button("Block Sender", role: .destructive) { model.block(thread, wholeDomain: false) }
                         Button("Block Domain", role: .destructive) { model.block(thread, wholeDomain: true) }
                         Divider()
                         Button("Manage Blocked…") { model.showBlocked = true }
                     } label: {
-                        Text("More ↓")
-                            .font(CWT.font(12))
-                            .foregroundStyle(CWT.ink)
+                        Image(systemName: "ellipsis.circle")
                     }
                     .help("More… (⌘K opens the command palette)")
                     .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
                     .fixedSize()
                     Spacer()
                 }
-                .buttonStyle(.textAction)
-                .padding(.top, 4)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -249,8 +275,7 @@ enum ThreadHTML {
                   padding: 3px 8px; margin: 0 6px 6px 0; font-size: 11px;
                   text-decoration: none; color: inherit; }
           .chipsize { color: var(--ink3); }
-          .plain { white-space: pre-wrap; overflow-x: auto;
-                   font: 13px -apple-system, sans-serif; }
+          .plain { white-space: pre-wrap; overflow-x: auto; }
           .plain.quoted { color: var(--ink3); }
           details.plainq summary { cursor: pointer; color: var(--ink2); list-style: none;
               display: inline-block; border: 1px solid var(--hairline);

@@ -189,9 +189,12 @@ struct RootView: View {
                 .navigationTitle(listModel.filter.title)
                 .toolbar {
                     ToolbarItem {
-                        Button("Compose") { model.compose() }
-                            .buttonStyle(.textAction)
-                            .help("Compose (C)")
+                        Button {
+                            model.compose()
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .help("Compose (C)")
                     }
                 }
                 #if os(macOS)
@@ -379,7 +382,7 @@ struct RootView: View {
                         model.selectedThread = nil
                         model.mailbox = nil
                     } label: {
-                        RailIcon("All Mailboxes", glyph: "ALL")
+                        RailIcon("All Mailboxes", systemImage: "rectangle.split.3x1")
                     }
                     .buttonStyle(.plain)
                     .moveDisabled(true)
@@ -388,7 +391,7 @@ struct RootView: View {
                 Section {
                     ForEach(order.items) { item in
                         RailIcon(item.title,
-                                 glyph: item.code,
+                                 systemImage: item.systemImage,
                                  badge: item == .open ? model.openUnreadCount : 0)
                             .tag(item.filter)
                             .contextMenu {
@@ -462,11 +465,12 @@ struct RootView: View {
         Button {
             withAnimation(.easeInOut(duration: 0.18)) { sidebarExpanded.toggle() }
         } label: {
-            Text(sidebarExpanded ? "«" : "»")
-                .font(CWT.font(14))
+            Image(systemName: sidebarExpanded ? "chevron.left.2" : "chevron.right.2")
+                .imageScale(.medium)
+                .foregroundStyle(CWT.ink2)
                 .frame(minWidth: 22, minHeight: 22)
         }
-        .buttonStyle(.textAction(CWT.ink2))
+        .buttonStyle(.plain)
         .help(sidebarExpanded ? "Collapse Sidebar (⌥⌘S)" : "Expand Sidebar (⌥⌘S)")
         .keyboardShortcut("s", modifiers: [.option, .command])
     }
@@ -521,9 +525,9 @@ struct AccountsSection: View {
                 // the address gone, color and the filled/hollow ring are what
                 // tell two accounts apart until you hover one.
                 RailIcon(account.email,
-                         glyph: account.includeInUnified ? "●" : "○",
+                         systemImage: account.includeInUnified ? "person.circle.fill" : "person.circle",
                          tint: accountColor(account.id),
-                         trailingSymbol: account.id == defaultComposeId ? "✎" : nil)
+                         trailingSymbol: account.id == defaultComposeId ? "square.and.pencil" : nil)
                 .tag(MailboxFilter.account(account.id))
                 .contextMenu {
                     Toggle("Include in Unified Inbox", isOn: Binding(
@@ -550,7 +554,7 @@ struct AccountsSection: View {
                                     Text(swatch.name)
                                 } icon: {
                                     Image(systemName: account.colorHex?.caseInsensitiveCompare(swatch.hex) == .orderedSame
-                                          ? "checkmark.square.fill" : "square.fill")
+                                          ? "checkmark.circle.fill" : "circle.fill")
                                         .foregroundStyle(swatch.color)
                                 }
                             }
@@ -560,7 +564,7 @@ struct AccountsSection: View {
                             setColor(account, nil)
                         } label: {
                             Label("Automatic",
-                                  systemImage: account.colorHex == nil ? "checkmark" : "square.dashed")
+                                  systemImage: account.colorHex == nil ? "checkmark" : "wand.and.stars")
                         }
                     }
                     Divider()
@@ -573,18 +577,18 @@ struct AccountsSection: View {
             Button(action: addAccount) {
                 if expanded {
                     HStack(spacing: 8) {
-                        Text("+").font(CWT.font(14)).frame(width: 22)
+                        Image(systemName: "plus.circle").imageScale(.large).frame(width: 22)
                         Text("Add Account…")
                         Spacer(minLength: 0)
                     }
                     .frame(minHeight: 22)
                 } else {
-                    Text("+")
-                        .font(CWT.font(14))
+                    Image(systemName: "plus.circle")
+                        .imageScale(.large)
                         .frame(maxWidth: .infinity, minHeight: 22)
                 }
             }
-            .buttonStyle(.textAction(CWT.ink2))
+            .buttonStyle(.plain)
             // Not draggable — it isn't a destination, it's the way to make one.
             .moveDisabled(true)
             .railTitle("Add Account…")

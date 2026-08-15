@@ -88,7 +88,9 @@ enum CWT {
     static func registerFonts() {
         guard !fontsRegistered else { return }
         var ok = false
-        for name in ["SpaceMono-Regular", "SpaceMono-Bold"] {
+        // Italic faces are bundled for the compose editor's I button only;
+        // the chrome never uses them.
+        for name in ["SpaceMono-Regular", "SpaceMono-Bold", "SpaceMono-Italic", "SpaceMono-BoldItalic"] {
             guard let url = Bundle.main.url(forResource: name, withExtension: "ttf") else { continue }
             var error: Unmanaged<CFError>?
             if CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
@@ -99,6 +101,12 @@ enum CWT {
             }
         }
         fontsRegistered = ok
+    }
+
+    /// The regular face as an AppKit/UIKit font, for text views.
+    static func platformFont(size: CGFloat) -> PlatformFont {
+        PlatformFont(name: regularFace, size: size)
+            ?? .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     // MARK: Helpers
@@ -242,10 +250,17 @@ extension View {
 /// Empty state: a title and one line of explanation, set in type. No symbol.
 struct EmptyState: View {
     let title: String
+    var systemImage: String?
     var detail: String?
 
     var body: some View {
         VStack(spacing: 6) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(CWT.ink3)
+                    .padding(.bottom, 6)
+            }
             Text(title.uppercased())
                 .font(CWT.label)
                 .tracking(CWT.labelTracking)

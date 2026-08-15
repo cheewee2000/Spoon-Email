@@ -23,7 +23,10 @@ enum ComposeStyle {
     static let baseSize: CGFloat = 16
     #endif
 
-    static var baseFont: PlatformFont { .systemFont(ofSize: baseSize) }
+    /// Space Mono, like the rest of the app. Display only: the serializer
+    /// writes bold/italic/size, never a family, so the recipient's client
+    /// still picks its own default.
+    static var baseFont: PlatformFont { CWT.platformFont(size: baseSize) }
 
     /// Near-black, matching the white sheet below. `hex(_:)` drops near-black
     /// when serializing, so this never reaches the HTML and the recipient's

@@ -60,6 +60,8 @@ struct CommandPalette: View {
                                 run(action)
                             } label: {
                                 HStack {
+                                    Image(systemName: action.systemImage)
+                                        .frame(width: 22)
                                     Text(action.title)
                                         .font(CWT.font(12))
                                     Spacer()

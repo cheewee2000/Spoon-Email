@@ -59,21 +59,26 @@ struct ThreadListView: View {
         .overlay {
             if listModel.threads.isEmpty {
                 if searchQuery != nil {
-                    EmptyState(title: "No results", detail: "Nothing on this Mac matches.")
+                    EmptyState(title: "No results", systemImage: "magnifyingglass",
+                               detail: "Nothing on this Mac matches.")
                 } else if listModel.filter == .spam {
-                    EmptyState(title: "No spam", detail: "Gmail's spam folder is empty.")
+                    EmptyState(title: "No spam", systemImage: "xmark.bin",
+                               detail: "Gmail's spam folder is empty.")
                 } else if listModel.filter == .blocked {
-                    EmptyState(title: "Nothing blocked",
-                               detail: "Block a sender or domain from a message's More menu.")
+                    EmptyState(title: "Nothing blocked", systemImage: "hand.raised",
+                               detail: "Block a sender or domain from a message's ••• menu.")
                 } else {
-                    EmptyState(title: "Inbox zero", detail: "Nothing here.")
+                    EmptyState(title: "Inbox zero", systemImage: "checkmark.circle",
+                               detail: "Nothing here.")
                 }
             }
         }
         .safeAreaInset(edge: .bottom) {
             if let query = searchQuery {
-                Button("Search Gmail for older mail ↓") {
+                Button {
                     model.serverSearch(query)
+                } label: {
+                    Label("Search Gmail for older mail", systemImage: "icloud.and.arrow.down")
                 }
                 .buttonStyle(.square)
                 .padding(6)
@@ -186,11 +191,13 @@ struct ThreadRow: View {
                     }
                     Spacer()
                     if thread.hasAttachments {
-                        Tag(text: "ATT", color: CWT.ink3, inverted: false)
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 10))
+                            .foregroundStyle(CWT.ink3)
                     }
                     if thread.isStarred {
-                        Text("★")
-                            .font(CWT.font(11))
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10))
                             .foregroundStyle(CWT.orange)
                     }
                     Text(Self.relativeDate(thread.lastDate))

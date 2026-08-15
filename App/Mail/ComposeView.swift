@@ -257,27 +257,27 @@ struct ComposeView: View {
     /// Rich-text formatting for the body. The editor also takes the standard
     /// system shortcuts, so these are the discoverable version.
     private var formatBar: some View {
-        HStack(spacing: 14) {
-            Button { rich.toggleBold() } label: { Text("B").bold() }
+        HStack(spacing: 4) {
+            Button { rich.toggleBold() } label: { Image(systemName: "bold") }
                 .keyboardShortcut("b", modifiers: .command)
                 .help("Bold (⌘B)")
-            Button("I") { rich.toggleItalic() }
+            Button { rich.toggleItalic() } label: { Image(systemName: "italic") }
                 .keyboardShortcut("i", modifiers: .command)
                 .help("Italic (⌘I)")
-            Button { rich.toggleUnderline() } label: { Text("U").underline() }
+            Button { rich.toggleUnderline() } label: { Image(systemName: "underline") }
                 .keyboardShortcut("u", modifiers: .command)
                 .help("Underline (⌘U)")
-            Button { rich.toggleStrikethrough() } label: { Text("S").strikethrough() }
+            Button { rich.toggleStrikethrough() } label: { Image(systemName: "strikethrough") }
                 .help("Strikethrough")
             Hairline(axis: .vertical).frame(height: 14)
-            Button("Link") { linkURL = ""; showLinkPrompt = true }
+            Button { linkURL = ""; showLinkPrompt = true } label: { Image(systemName: "link") }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
                 .help("Add Link (⇧⌘K)")
-            Button("Clear") { rich.clearFormatting() }
+            Button { rich.clearFormatting() } label: { Image(systemName: "eraser") }
                 .help("Clear formatting from the selection")
             Spacer()
         }
-        .buttonStyle(.textAction(CWT.ink2))
+        .buttonStyle(.borderless)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .popover(isPresented: $showLinkPrompt) {

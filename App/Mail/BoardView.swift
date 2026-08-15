@@ -29,16 +29,19 @@ struct BoardView: View {
         }
         .overlay {
             if order.boardItems.isEmpty {
-                EmptyState(title: "No columns",
+                EmptyState(title: "No columns", systemImage: "rectangle.split.3x1",
                            detail: "Right-click a mailbox in the sidebar to show it here.")
             }
         }
         .navigationTitle("All Mailboxes")
         .toolbar {
             ToolbarItem {
-                Button("Compose") { model.compose() }
-                    .buttonStyle(.textAction)
-                    .help("Compose (C)")
+                Button {
+                    model.compose()
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .help("Compose (C)")
             }
         }
     }
@@ -121,8 +124,10 @@ private struct BoardColumn: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            SectionLabel(text: item.code)
+        HStack(spacing: 6) {
+            Image(systemName: item.systemImage)
+                .imageScale(.small)
+                .foregroundStyle(CWT.ink2)
             Text(item.title)
                 .font(CWT.font(12, bold: true))
             Spacer(minLength: 4)
@@ -144,7 +149,7 @@ private struct BoardColumn: View {
         .onTapGesture { model.mailbox = item.filter }
         .help("Open \(item.title) — drag to reorder")
         .draggable(item.rawValue) {
-            Text(item.title)
+            Label(item.title, systemImage: item.systemImage)
                 .font(CWT.font(12))
                 .padding(6)
                 .background(CWT.paper)

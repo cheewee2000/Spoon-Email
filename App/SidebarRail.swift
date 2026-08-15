@@ -27,8 +27,23 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Three-letter code, the way CW&T tags everything (`CWT_HSM4PW4`):
-    /// what the collapsed rail and column headers show instead of an icon.
+    var systemImage: String {
+        switch self {
+        case .unified: "tray.full"
+        case .important: "star"
+        case .newsletters: "newspaper"
+        case .updates: "bell"
+        case .other: "tray"
+        case .open: "clock"
+        case .drafts: "doc.badge.ellipsis"
+        case .sent: "paperplane"
+        case .archived: "archivebox"
+        case .blocked: "hand.raised"
+        case .spam: "xmark.bin"
+        }
+    }
+
+    /// Three-letter code, the way CW&T tags everything (`CWT_HSM4PW4`).
     var code: String {
         switch self {
         case .unified: "UNI"
@@ -272,12 +287,11 @@ extension View {
 
 // MARK: - Rail row
 
-/// One destination in the rail: a short code (or a colored dot for an
-/// account) named on hover when collapsed, code beside its name when
-/// expanded. Text and glyphs, no icons — see `CWT`.
+/// One destination in the rail: icon only and named on hover when collapsed,
+/// icon beside its name when expanded.
 struct RailIcon: View {
     let title: String
-    let glyph: String
+    let systemImage: String
     var tint: Color?
     var badge: Int = 0
     /// Small marker trailing the row — the pencil that flags the account new
@@ -285,10 +299,10 @@ struct RailIcon: View {
     var trailingSymbol: String?
     @Environment(\.railExpanded) private var expanded
 
-    init(_ title: String, glyph: String, tint: Color? = nil, badge: Int = 0,
+    init(_ title: String, systemImage: String, tint: Color? = nil, badge: Int = 0,
          trailingSymbol: String? = nil) {
         self.title = title
-        self.glyph = glyph
+        self.systemImage = systemImage
         self.tint = tint
         self.badge = badge
         self.trailingSymbol = trailingSymbol
@@ -303,7 +317,7 @@ struct RailIcon: View {
 
     private var labeled: some View {
         HStack(spacing: 8) {
-            icon.frame(width: 26, alignment: .leading)
+            icon.imageScale(.large).frame(width: 22)
             // Addresses are the long ones, and their tail — the domain — is
             // what tells two accounts apart, so trim from the middle.
             Text(title)
@@ -318,6 +332,7 @@ struct RailIcon: View {
 
     private var iconOnly: some View {
         icon
+            .imageScale(.large)
             .frame(maxWidth: .infinity, minHeight: 22)
             .overlay(alignment: .topTrailing) {
                 if badge > 0 {
@@ -332,8 +347,8 @@ struct RailIcon: View {
     }
 
     private func marker(_ symbol: String) -> some View {
-        Text(symbol)
-            .font(CWT.font(9))
+        Image(systemName: symbol)
+            .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(CWT.ink3)
     }
 
@@ -342,12 +357,12 @@ struct RailIcon: View {
     }
 
     // Only accounts carry a tint; everything else lets the list color its own
-    // text, so a selected row still flips on the highlight.
+    // symbol, so a selected row still flips on the highlight.
     @ViewBuilder private var icon: some View {
         if let tint {
-            Text(glyph).font(CWT.font(13)).foregroundStyle(tint)
+            Image(systemName: systemImage).foregroundStyle(tint)
         } else {
-            Text(glyph).font(CWT.font(10, bold: true)).tracking(CWT.labelTracking)
+            Image(systemName: systemImage)
         }
     }
 }
