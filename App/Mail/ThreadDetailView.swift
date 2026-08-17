@@ -281,6 +281,7 @@ enum ThreadHTML {
               display: inline-block; border: 1px solid var(--hairline);
               padding: 0 8px; margin: 8px 0; font-size: 11px; }
           .frame { width: 100%; border: none; height: 120px; background: #fff; }
+          ::selection { background: #b4d5fe; color: #111; }
         </style></head><body>\(sections)
         <script>
         // Links leave the app: hand them to the native side, which opens the
@@ -448,6 +449,10 @@ enum ThreadHTML {
           body { margin: 8px; font: 13px -apple-system, sans-serif; background: #fff; color: #000; }
           img { max-width: 100% !important; height: auto !important; }
           blockquote { border-left: 2px solid #ccc; margin: 8px 0; padding-left: 10px; color: #555; }
+          /* Explicit selection color: WebKit otherwise derives it from the
+             app accent, which is near-white in dark mode — invisible on the
+             white email background while the window is active. */
+          ::selection { background: #b4d5fe !important; color: #000 !important; }
         </style>
         \(pinViewportUnits(html))
         <style>
