@@ -1,7 +1,7 @@
 import SwiftUI
 import MailCore
 
-/// Confirm → progress → result for a single unsubscribe.
+/// Progress → result for a single unsubscribe (no confirmation step).
 struct UnsubscribeSheet: View {
     @EnvironmentObject var model: AppModel
     let session: UnsubscribeSession
@@ -45,12 +45,6 @@ struct UnsubscribeSheet: View {
     @ViewBuilder
     private var buttons: some View {
         switch session.stage {
-        case .confirm:
-            Button("Cancel", role: .cancel) { model.dismissUnsubscribe() }
-                .keyboardShortcut(.cancelAction)
-            Button("Unsubscribe") { model.confirmUnsubscribe() }
-                .buttonStyle(.squarePrimary)
-                .keyboardShortcut(.defaultAction)
         case .working:
             Button("Cancel", role: .cancel) { model.dismissUnsubscribe() }
                 .disabled(true)
@@ -81,7 +75,6 @@ struct UnsubscribeSheet: View {
 
     private var title: String {
         switch session.stage {
-        case .confirm:        return "Unsubscribe?"
         case .working:        return "Unsubscribing…"
         case .browserPending: return "Finish in your browser"
         case .done:           return "Unsubscribed"
@@ -91,10 +84,8 @@ struct UnsubscribeSheet: View {
 
     private var detail: String {
         switch session.stage {
-        case .confirm:
-            return session.method + " The conversation is archived once it goes through."
         case .working:
-            return "Sending the unsubscribe request…"
+            return session.method + " Sending the unsubscribe request…"
         case .browserPending:
             return "The sender's unsubscribe page is open in your browser. Complete it there, then archive this conversation."
         case .done(let text):

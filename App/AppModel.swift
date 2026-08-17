@@ -11,7 +11,6 @@ import AppKit
 
 /// Where an in-flight unsubscribe currently stands.
 enum UnsubscribeStage: Equatable {
-    case confirm
     case working
     case browserPending(URL)   // web form opened; user confirms when done
     case done(String)
@@ -730,8 +729,9 @@ final class AppModel: ObservableObject {
 
     // MARK: - Unsubscribe / block / attachments
 
-    /// Opens the unsubscribe sheet: confirm → progress → result. The thread is
-    /// archived once the unsubscribe actually lands.
+    /// Opens the unsubscribe sheet and fires the unsubscribe right away
+    /// (progress → result, no confirmation). The thread is archived once the
+    /// unsubscribe actually lands.
     func beginUnsubscribe(_ thread: MailThread) {
         guard let m = lastMessage(in: thread),
               let links = Unsubscriber.parse(header: m.listUnsubscribe,
@@ -742,9 +742,11 @@ final class AppModel: ObservableObject {
         unsubscribe = UnsubscribeSession(thread: thread,
                                          sender: m.fromEmail.isEmpty ? thread.participants : m.fromEmail,
                                          links: links,
-                                         stage: .confirm)
+                                         stage: .working)
+        confirmUnsubscribe()
     }
 
+    /// Runs (or retries) the unsubscribe for the open session.
     func confirmUnsubscribe() {
         guard let session = unsubscribe else { return }
         setUnsubscribeStage(.working, for: session.id)
