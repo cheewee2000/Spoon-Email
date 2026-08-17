@@ -345,6 +345,7 @@ final class AppModel: ObservableObject {
     // MARK: - Thread actions
 
     func archive(_ thread: MailThread) {
+        ThreadListModel.hideEverywhere(thread.key)
         pushUndo("Archive") { [weak self] in
             guard let self else { return }
             Task {
@@ -369,6 +370,7 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+        ThreadListModel.noteUserAction()
         Task { await syncEngine.markRead(accountId: thread.accountId, threadId: thread.id, read: read) }
     }
 
@@ -381,6 +383,7 @@ final class AppModel: ObservableObject {
                                                  starred: wasStarred)
             }
         }
+        ThreadListModel.noteUserAction()
         Task { await syncEngine.toggleStar(accountId: thread.accountId, threadId: thread.id, starred: !wasStarred) }
     }
 
@@ -395,6 +398,8 @@ final class AppModel: ObservableObject {
                                               open: wasOpen)
             }
         }
+        // Open/closed lists are disjoint, so wherever it's showing, it leaves.
+        ThreadListModel.hideEverywhere(thread.key)
         Task { await syncEngine.setOpen(accountId: thread.accountId, threadId: thread.id, open: !wasOpen) }
     }
 

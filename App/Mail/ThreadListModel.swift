@@ -22,6 +22,54 @@ final class ThreadListModel: ObservableObject {
     init(pageSize: Int = ThreadListModel.pageSize) {
         self.pageSize = pageSize
         self.limit = pageSize
+        Self.live.append(Weak(value: self))
+    }
+
+    // MARK: - Optimistic user actions
+
+    /// Every list alive right now, so a triage keystroke can update all of
+    /// them (the full-width list, the board's columns) without the model
+    /// having to know which is on screen.
+    private struct Weak { weak var value: ThreadListModel? }
+    private static var live: [Weak] = []
+    private static var lastUserAction: Date = .distantPast
+
+    /// Called for a change you made by hand (archive, star, open…). For the
+    /// next second, deliveries apply straight away instead of joining the
+    /// coalesced sync flood — a keystroke must never wait on a batching
+    /// window that exists for background writes.
+    static func noteUserAction() {
+        lastUserAction = Date()
+        live.removeAll { $0.value == nil }
+    }
+
+    /// Drops the thread from every list currently showing it, right now,
+    /// before the database write lands. Each list keeps filtering it out of
+    /// deliveries until one arrives without it (the commit) — otherwise the
+    /// per-thread sync commits landing in between would flash it back.
+    static func hideEverywhere(_ key: String) {
+        noteUserAction()
+        for entry in live {
+            guard let list = entry.value, list.threads.contains(where: { $0.key == key }) else { continue }
+            list.hidden[key] = Date()
+            list.pendingApply?.cancel()
+            list.pendingApply = nil
+            list.threads.removeAll { $0.key == key }
+        }
+    }
+
+    /// Key → when it was hidden. Released once a delivery arrives without
+    /// it, or after a few seconds regardless (an undo that lands before the
+    /// commit's delivery would otherwise keep it filtered).
+    private var hidden: [String: Date] = [:]
+
+    private func filtered(_ threads: [MailThread]) -> [MailThread] {
+        guard !hidden.isEmpty else { return threads }
+        let present = Set(threads.map(\.key))
+        let now = Date()
+        hidden = hidden.filter { present.contains($0.key) && now.timeIntervalSince($0.value) < 3 }
+        guard !hidden.isEmpty else { return threads }
+        return threads.filter { hidden[$0.key] == nil }
     }
 
     func observe(db: AppDatabase, filter: MailboxFilter) {
@@ -69,9 +117,11 @@ final class ThreadListModel: ObservableObject {
     private var latest: [MailThread] = []
 
     private func apply(_ threads: [MailThread]) {
+        let threads = filtered(threads)
         latest = threads
         let sinceLast = Date().timeIntervalSince(lastApplied)
-        guard sinceLast < Self.coalesceWindow else {
+        let userDriven = Date().timeIntervalSince(Self.lastUserAction) < 1
+        guard sinceLast < Self.coalesceWindow, !userDriven else {
             pendingApply?.cancel()
             pendingApply = nil
             lastApplied = Date()
@@ -106,7 +156,8 @@ final class ThreadListModel: ObservableObject {
         ) { error in
             print("search observation error: \(error)")
         } onChange: { [weak self] threads in
-            self?.threads = threads
+            guard let self else { return }
+            self.threads = self.filtered(threads)
         }
     }
 
