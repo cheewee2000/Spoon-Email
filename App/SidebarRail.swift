@@ -266,8 +266,12 @@ extension View {
     /// very labels that make it readable.
     func railHoverLabel() -> some View {
         overlayPreferenceValue(RailHoverKey.self) { target in
-            GeometryReader { proxy in
-                if let target {
+            // Only exists while a rail item is hovered. Left in place all the
+            // time, this window-wide GeometryReader — even with hit testing
+            // off — swallows mouse drags before they reach the reader's
+            // WKWebView, so text in a message could not be selected.
+            if let target {
+                GeometryReader { proxy in
                     let rect = proxy[target.anchor]
                     Text(target.title)
                         .font(CWT.font(12))
@@ -279,8 +283,8 @@ extension View {
                         .fixedSize()
                         .offset(x: rect.maxX + 8, y: rect.midY - 14)
                 }
+                .allowsHitTesting(false)
             }
-            .allowsHitTesting(false)
         }
     }
 }
