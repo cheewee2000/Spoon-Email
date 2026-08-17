@@ -35,11 +35,17 @@ public enum MailboxFilter: Hashable, Sendable {
     /// Threads for this mailbox, newest first. Unified views (including the
     /// split tabs) skip accounts excluded from the unified inbox.
     public func fetch(_ db: Database, limit: Int = 300) throws -> [MailThread] {
+        // Inbox membership is the denormalized `thread.isInbox` (kept by
+        // triggers on thread_label; see migration v14) so these walk a
+        // partial index newest-first instead of joining the label table.
+        // The account filter is an IN-subquery, not a join: with it the
+        // planner runs the (accountId, lastDate) index once per included
+        // account, so an excluded account's 40k inbox threads never get
+        // touched (<1ms vs 11ms for the join form).
         let unifiedJoin = """
             FROM thread t
-            JOIN account a ON a.id = t.accountId AND a.includeInUnified = 1
-            JOIN thread_label tl ON tl.accountId = t.accountId AND tl.threadId = t.id AND tl.labelId = ?
             """
+        let unifiedWhere = "t.isInbox = 1 AND t.accountId IN (SELECT id FROM account WHERE includeInUnified = 1)"
         let plainJoin = """
             FROM thread t
             JOIN thread_label tl ON tl.accountId = t.accountId AND tl.threadId = t.id AND tl.labelId = ?
@@ -47,8 +53,8 @@ public enum MailboxFilter: Hashable, Sendable {
         let order = "ORDER BY t.lastDate DESC LIMIT \(limit)"
         switch self {
         case .unified:
-            return try MailThread.fetchAll(db, sql: "SELECT t.* \(unifiedJoin) WHERE t.isOpen = 0 \(order)",
-                                           arguments: [GmailLabels.inbox])
+            return try MailThread.fetchAll(
+                db, sql: "SELECT t.* \(unifiedJoin) WHERE \(unifiedWhere) AND t.isOpen = 0 \(order)")
         case .important, .newsletters, .updates, .other:
             let cat: String = {
                 switch self {
@@ -59,8 +65,8 @@ public enum MailboxFilter: Hashable, Sendable {
                 }
             }()
             return try MailThread.fetchAll(
-                db, sql: "SELECT t.* \(unifiedJoin) WHERE t.category = ? AND t.isOpen = 0 \(order)",
-                arguments: [GmailLabels.inbox, cat])
+                db, sql: "SELECT t.* \(unifiedJoin) WHERE \(unifiedWhere) AND t.category = ? AND t.isOpen = 0 \(order)",
+                arguments: [cat])
         case .open:
             return try MailThread.fetchAll(
                 db, sql: "SELECT t.* FROM thread t WHERE t.isOpen = 1 \(order)")
@@ -111,8 +117,8 @@ public enum MailboxFilter: Hashable, Sendable {
                                            arguments: [GmailLabels.spam])
         case .account(let id):
             return try MailThread.fetchAll(
-                db, sql: "SELECT t.* \(plainJoin) WHERE t.accountId = ? AND t.isOpen = 0 \(order)",
-                arguments: [GmailLabels.inbox, id])
+                db, sql: "SELECT t.* FROM thread t WHERE t.isInbox = 1 AND t.accountId = ? AND t.isOpen = 0 \(order)",
+                arguments: [id])
         }
     }
 }

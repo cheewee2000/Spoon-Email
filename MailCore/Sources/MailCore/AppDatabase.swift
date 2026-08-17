@@ -283,6 +283,42 @@ public final class AppDatabase: Sendable {
         m.registerMigration("v13") { db in
             try db.execute(sql: "ALTER TABLE account ADD COLUMN spamSynced BOOLEAN NOT NULL DEFAULT 0")
         }
+        m.registerMigration("v14") { db in
+            // The inbox lists re-run on every commit, and a sync pass commits
+            // once per thread. Each run walked all ~44k INBOX label rows,
+            // joined, and sorted them (33ms) to keep 300. A denormalized flag
+            // on the thread row plus partial indexes turns that into an index
+            // walk that stops at 300. Triggers keep the flag right through
+            // every write path (sync store, optimistic modify, draft cleanup)
+            // without any of them having to know it exists; MailThread doesn't
+            // encode the column, so record saves leave it alone.
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN isInbox BOOLEAN NOT NULL DEFAULT 0")
+            try db.execute(sql: """
+                UPDATE thread SET isInbox = 1 WHERE EXISTS (
+                    SELECT 1 FROM thread_label tl
+                    WHERE tl.accountId = thread.accountId AND tl.threadId = thread.id AND tl.labelId = 'INBOX'
+                )
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER thread_label_inbox_insert AFTER INSERT ON thread_label
+                WHEN NEW.labelId = 'INBOX'
+                BEGIN
+                    UPDATE thread SET isInbox = 1
+                    WHERE accountId = NEW.accountId AND id = NEW.threadId AND isInbox = 0;
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER thread_label_inbox_delete AFTER DELETE ON thread_label
+                WHEN OLD.labelId = 'INBOX'
+                BEGIN
+                    UPDATE thread SET isInbox = 0
+                    WHERE accountId = OLD.accountId AND id = OLD.threadId AND isInbox = 1;
+                END
+                """)
+            try db.execute(sql: "CREATE INDEX index_thread_inbox_date ON thread(lastDate) WHERE isInbox = 1")
+            try db.execute(sql: "CREATE INDEX index_thread_inbox_category_date ON thread(category, lastDate) WHERE isInbox = 1")
+            try db.execute(sql: "CREATE INDEX index_thread_inbox_account_date ON thread(accountId, lastDate) WHERE isInbox = 1")
+        }
         return m
     }
 }
