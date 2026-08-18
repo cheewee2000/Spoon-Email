@@ -201,7 +201,7 @@ final class ThreadDetailModel: ObservableObject {
         let client = accounts.client(for: accountId)
         let inlineImages = self.inlineImages
         let avatars = self.avatars
-        let observation = ValueObservation.tracking { db -> ([Message], [String: [Attachment]], String) in
+        let observation = ValueObservation.tracking { db -> ([Message], [String: [Attachment]], String, Int) in
             let messages = try Message.fetchAll(
                 db,
                 sql: "SELECT * FROM message WHERE accountId = ? AND threadId = ? ORDER BY date",
@@ -215,22 +215,37 @@ final class ThreadDetailModel: ObservableObject {
                 """,
                 arguments: [accountId, threadId])
             let byMessage = Dictionary(grouping: attachments, by: \.messageId)
+            // Stamp the render with the map versions it was built from: the
+            // page travels DB queue → main, and the fetch tasks can land bytes
+            // and publish a fresher page in between. Without the stamp that
+            // stale page overwrites the good one, and — the maps now being
+            // full — nothing asks for a re-render until an unrelated write.
+            let generation = inlineImages.version + avatars.version
             return (messages, byMessage,
                     ThreadHTML.render(messages: messages, attachments: byMessage,
                                       inlineImages: inlineImages.snapshot(),
-                                      avatars: avatars.snapshot()))
+                                      avatars: avatars.snapshot()),
+                    generation)
         }
         cancellable = observation.start(
             in: db.writer,
             scheduling: .async(onQueue: .main)
         ) { error in
             print("message observation error: \(error)")
-        } onChange: { [weak self] (messages, attachments, html) in
-            self?.messages = messages
-            self?.attachments = attachments
-            self?.html = html
-            self?.fetchInlineImages(messages: messages, attachments: attachments, client: client)
-            self?.fetchAvatars(messages: messages, attachments: attachments)
+        } onChange: { [weak self] (messages, attachments, html, generation) in
+            guard let self else { return }
+            self.messages = messages
+            self.attachments = attachments
+            self.html = html
+            self.fetchInlineImages(messages: messages, attachments: attachments, client: client)
+            self.fetchAvatars(messages: messages, attachments: attachments)
+            if generation != inlineImages.version + avatars.version {
+                // Rendered from maps that have since moved on — rebuild.
+                Task { [weak self] in
+                    guard let self else { return }
+                    self.html = await self.rerender(messages: messages, attachments: attachments)
+                }
+            }
         }
     }
 
@@ -320,7 +335,15 @@ final class ThreadDetailModel: ObservableObject {
 /// the database queue that renders the thread, so it carries its own lock.
 final class InlineImageMap: @unchecked Sendable {
     private var storage: [String: [String: String]] = [:]
+    private var _version = 0
     private let lock = NSLock()
+
+    /// Bumps on every write, so a render can tell whether it was built from
+    /// the current contents.
+    var version: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _version
+    }
 
     func snapshot() -> [String: [String: String]] {
         lock.lock(); defer { lock.unlock() }
@@ -335,11 +358,13 @@ final class InlineImageMap: @unchecked Sendable {
     func set(messageId: String, contentId: String, uri: String) {
         lock.lock(); defer { lock.unlock() }
         storage[messageId, default: [:]][contentId] = uri
+        _version += 1
     }
 
     func clear() {
         lock.lock(); defer { lock.unlock() }
         storage = [:]
+        _version += 1
     }
 }
 
@@ -348,7 +373,13 @@ final class InlineImageMap: @unchecked Sendable {
 /// remembering: it's what stops the render from asking again.
 final class AvatarMap: @unchecked Sendable {
     private var storage: [String: String?] = [:]
+    private var _version = 0
     private let lock = NSLock()
+
+    var version: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _version
+    }
 
     func snapshot() -> [String: String] {
         lock.lock(); defer { lock.unlock() }
@@ -363,10 +394,12 @@ final class AvatarMap: @unchecked Sendable {
     func set(email: String, uri: String?) {
         lock.lock(); defer { lock.unlock() }
         storage[email] = .some(uri)
+        if uri != nil { _version += 1 }
     }
 
     func clear() {
         lock.lock(); defer { lock.unlock() }
         storage = [:]
+        _version += 1
     }
 }
