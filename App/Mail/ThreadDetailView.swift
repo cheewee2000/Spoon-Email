@@ -18,6 +18,7 @@ struct ThreadDetailView: View {
                     Text(thread.subject)
                         .font(CWT.font(14, bold: true))
                         .lineLimit(2)
+                        .textSelection(.enabled)
                     Text(model.accountEmail(thread.accountId))
                         .font(CWT.caption)
                         .foregroundStyle(CWT.ink3)
