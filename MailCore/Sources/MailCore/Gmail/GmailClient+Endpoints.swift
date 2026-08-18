@@ -85,9 +85,11 @@ public extension GmailClient {
         return out
     }
 
-    struct GLabel: Decodable, Sendable {
+    struct GLabel: Decodable, Sendable, Hashable, Identifiable {
         public let id: String
         public let name: String
+        /// "system" for INBOX/STARRED/CATEGORY_*…, "user" for the ones you made.
+        public let type: String?
     }
 
     func listLabels() async throws -> [GLabel] {

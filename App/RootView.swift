@@ -183,6 +183,18 @@ struct RootView: View {
         } message: {
             Text(model.lastError ?? "")
         }
+        .alert("New Label", isPresented: Binding(
+            get: { model.newLabelPrompt != nil },
+            set: { if !$0 { model.newLabelPrompt = nil } }
+        )) {
+            TextField("Label name", text: $model.newLabelName)
+            Button("Cancel", role: .cancel) { model.newLabelPrompt = nil }
+            Button(model.newLabelPrompt?.move == true ? "Create & Move" : "Create & Apply") {
+                model.createLabelFromPrompt()
+            }
+        } message: {
+            Text("Created in Gmail for \(model.accountStore.accounts.first { $0.id == model.newLabelPrompt?.thread.accountId }?.email ?? "this account").")
+        }
     }
 
     /// What the current layout should show when the sidebar is hidden: the

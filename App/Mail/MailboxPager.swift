@@ -228,10 +228,7 @@ private struct ThreadPageList: View {
                     }
                     .tint(CWT.orange)
                 }
-                .contextMenu {
-                    Button(thread.isStarred ? "Unstar" : "Star") { model.toggleStar(thread) }
-                    Button(thread.isOpen ? "Remove from Open" : "Mark Open") { model.toggleOpen(thread) }
-                }
+                .contextMenu { ThreadContextMenu(thread: thread) }
             }
         }
         .listStyle(.plain)

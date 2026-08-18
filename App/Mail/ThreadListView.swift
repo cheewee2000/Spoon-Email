@@ -35,18 +35,7 @@ struct ThreadListView: View {
                         }
                         .tint(CWT.green)
                     }
-                    .contextMenu {
-                        Button("Archive") { model.archive(thread) }
-                        Button(thread.isUnread ? "Mark Read" : "Mark Unread") {
-                            model.markRead(thread, read: thread.isUnread)
-                        }
-                        Button(thread.isStarred ? "Unstar" : "Star") {
-                            model.toggleStar(thread)
-                        }
-                        Button(thread.isOpen ? "Remove from Open" : "Mark Open") {
-                            model.toggleOpen(thread)
-                        }
-                    }
+                    .contextMenu { ThreadContextMenu(thread: thread) }
                     .hotkeyHoverTarget(thread, model: model)
             }
         }

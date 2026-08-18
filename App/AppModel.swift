@@ -115,6 +115,7 @@ final class AppModel: ObservableObject {
             await pushAccountEmails()
             await outbox.start()
             syncNow()
+            loadLabels()
             // Backfill deliberately does NOT start here — see
             // startBackfillIfNeeded().
         }
@@ -340,6 +341,133 @@ final class AppModel: ObservableObject {
         if undoToast != nil { undoSend(); return }
         guard let action = undoStack.popLast() else { return }
         action.perform()
+    }
+
+    // MARK: - Labels
+
+    /// The user-made labels of each account, name-sorted, for the context
+    /// menu. System labels (INBOX, STARRED, CATEGORY_*…) are handled by the
+    /// dedicated toggles and left out.
+    @Published private(set) var userLabels: [String: [GmailClient.GLabel]] = [:]
+    private var labelsLoadedAt: [String: Date] = [:]
+    /// Set to ask for a label name; `move` also drops the thread from the
+    /// inbox once the label is on.
+    @Published var newLabelPrompt: (thread: MailThread, move: Bool)?
+    @Published var newLabelName = ""
+
+    /// Fetches the label list once per account (and again after an hour, or
+    /// when `force`d — after creating one). One small request per account.
+    func loadLabels(force: Bool = false) {
+        for account in accountStore.accounts {
+            if !force, let at = labelsLoadedAt[account.id], Date().timeIntervalSince(at) < 3600 { continue }
+            labelsLoadedAt[account.id] = Date()
+            let client = accountStore.client(for: account.id)
+            Task { [weak self] in
+                guard let labels = try? await client.listLabels() else { return }
+                let user = labels
+                    .filter { $0.type == "user" && $0.name.caseInsensitiveCompare("Open") != .orderedSame }
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                await MainActor.run { self?.userLabels[account.id] = user }
+            }
+        }
+    }
+
+    /// Every label currently on the thread — read synchronously (it's a
+    /// handful of rows by primary key) so the menu can show check marks.
+    func labelIds(of thread: MailThread) -> Set<String> {
+        let ids = (try? db.writer.read { db in
+            try String.fetchAll(db, sql: "SELECT labelId FROM thread_label WHERE accountId = ? AND threadId = ?",
+                                arguments: [thread.accountId, thread.id])
+        }) ?? []
+        return Set(ids)
+    }
+
+    /// Puts one label on or takes it off, with undo. INBOX and the Open label
+    /// route through their dedicated actions so the lists react the same way
+    /// they do to a hotkey.
+    func setLabel(_ labelId: String, on: Bool, for thread: MailThread) {
+        if labelId == GmailLabels.inbox {
+            if on { unarchive(thread) } else { archive(thread) }
+            return
+        }
+        if labelId == GmailLabels.unread { markRead(thread, read: !on); return }
+        if labelId == GmailLabels.starred, thread.isStarred != on { toggleStar(thread); return }
+        let name = userLabels[thread.accountId]?.first { $0.id == labelId }?.name
+            ?? labelId.capitalized
+        pushUndo(on ? "Add \(name)" : "Remove \(name)") { [weak self] in
+            guard let self else { return }
+            Task {
+                await self.syncEngine.modifyThread(accountId: thread.accountId, threadId: thread.id,
+                                                   add: on ? [] : [labelId], remove: on ? [labelId] : [])
+            }
+        }
+        ThreadListModel.noteUserAction()
+        Task {
+            await syncEngine.modifyThread(accountId: thread.accountId, threadId: thread.id,
+                                          add: on ? [labelId] : [], remove: on ? [] : [labelId])
+        }
+    }
+
+    /// Back to the inbox from Archived (or anywhere else).
+    func unarchive(_ thread: MailThread) {
+        pushUndo("Move to Inbox") { [weak self] in
+            guard let self else { return }
+            Task { await self.syncEngine.archive(accountId: thread.accountId, threadId: thread.id) }
+        }
+        ThreadListModel.noteUserAction()
+        Task { await syncEngine.unarchive(accountId: thread.accountId, threadId: thread.id, restoreOpen: false) }
+    }
+
+    /// Gmail's "move to folder": the label goes on and the thread leaves the
+    /// inbox in one step.
+    func move(_ thread: MailThread, toLabel labelId: String) {
+        let wasOpen = thread.isOpen
+        var remove = [GmailLabels.inbox]
+        ThreadListModel.hideEverywhere(thread.key)
+        pushUndo("Move") { [weak self] in
+            guard let self else { return }
+            Task {
+                await self.syncEngine.modifyThread(accountId: thread.accountId, threadId: thread.id,
+                                                   add: [], remove: [labelId])
+                await self.syncEngine.unarchive(accountId: thread.accountId, threadId: thread.id,
+                                                restoreOpen: wasOpen)
+            }
+        }
+        Task {
+            // Archiving also clears Open, same as the archive action.
+            if let openId = await syncEngine.openLabel(accountId: thread.accountId) { remove.append(openId) }
+            await syncEngine.modifyThread(accountId: thread.accountId, threadId: thread.id,
+                                          add: [labelId], remove: remove)
+        }
+    }
+
+    func promptNewLabel(for thread: MailThread, move: Bool) {
+        newLabelName = ""
+        newLabelPrompt = (thread, move)
+    }
+
+    /// Creates the label the prompt asked for, then applies it (or moves the
+    /// thread into it).
+    func createLabelFromPrompt() {
+        guard let prompt = newLabelPrompt else { return }
+        let name = newLabelName.trimmingCharacters(in: .whitespaces)
+        newLabelPrompt = nil
+        newLabelName = ""
+        guard !name.isEmpty else { return }
+        let client = accountStore.client(for: prompt.thread.accountId)
+        Task { [weak self] in
+            do {
+                let label = try await client.createLabel(name: name)
+                guard let self else { return }
+                await MainActor.run {
+                    self.loadLabels(force: true)
+                    if prompt.move { self.move(prompt.thread, toLabel: label.id) }
+                    else { self.setLabel(label.id, on: true, for: prompt.thread) }
+                }
+            } catch {
+                await MainActor.run { self?.lastError = "Couldn't create label: \(error.localizedDescription)" }
+            }
+        }
     }
 
     // MARK: - Thread actions
