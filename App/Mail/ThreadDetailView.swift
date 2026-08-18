@@ -470,7 +470,11 @@ enum ThreadHTML {
     /// frame, which grows the block, forever. Real clients render into a
     /// fixed viewport; pin the units to one (600px tall) so they behave.
     private static let viewportHeightUnit = try? NSRegularExpression(
-        pattern: "(\\d*\\.?\\d+)\\s*(?:vh|svh|lvh|dvh|vmax|vb)\\b", options: [.caseInsensitive])
+        // The lookarounds keep this out of base64: an inlined image can carry
+        // a run like `K434vH/`, and with a plain word boundary that read as
+        // "434vh" and got rewritten to pixels — corrupting the picture.
+        pattern: "(?<![\\w+/=])(\\d*\\.?\\d+)\\s*(?:vh|svh|lvh|dvh|vmax|vb)(?![\\w+/=])",
+        options: [.caseInsensitive])
 
     /// Space Mono for the conversation chrome, inlined: the web view is its
     /// own process and can't see fonts registered with the app, and the
