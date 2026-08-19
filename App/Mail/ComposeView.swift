@@ -18,6 +18,7 @@ struct ComposeDraft: Identifiable {
     var inReplyTo: String = ""
     var references: String = ""
     var draftMessageId: String = ""  // Gmail draft being edited ("" if new)
+    var gmailDraftId: String = ""    // stable draft id, learned on first save this session
 }
 
 struct ComposeView: View {
@@ -35,6 +36,13 @@ struct ComposeView: View {
     @State private var linkURL = ""
     @State private var isDropTargeted = false
     @State private var dropError: String?
+    /// Fingerprint of the content most recently written to Gmail; autosave
+    /// only fires when the composer has drifted from it. Starts as the
+    /// opening content so an untouched draft never saves.
+    @State private var savedFingerprint = ""
+    /// Set once the message is sent or explicitly saved/closed — the exit
+    /// flush must not double-save behind it.
+    @State private var closing = false
     /// Files dropped on the window, sent as regular (non-inline) attachments.
     @State private var files: [ComposeAttachment] = []
     @StateObject private var rich = RichTextController()
@@ -143,11 +151,18 @@ struct ComposeView: View {
                     .padding(.top, 6)
             }
             HStack(spacing: 8) {
-                Button("Cancel") { close() }
+                Button("Close") {
+                    // Not a discard: progress survives as a draft, same as
+                    // closing the window. Deleting the draft discards it.
+                    autosaveIfDirty()
+                    closing = true
+                    close()
+                }
                     .buttonStyle(.textAction(CWT.ink2))
                     .keyboardShortcut(.escape, modifiers: [])
-                    .help("Cancel (Esc)")
+                    .help("Close — keeps your progress as a draft (Esc)")
                 Button("Save draft") {
+                    closing = true
                     captureBody()
                     model.saveDraft(draft)
                     close()
@@ -209,6 +224,48 @@ struct ComposeView: View {
             files = draft.attachments.filter { !$0.isInline }
             if !draft.cc.isEmpty || !draft.bcc.isEmpty { showCcBcc = true }
             focus = draft.to.isEmpty ? .to : .body
+            savedFingerprint = fingerprint()
+            #if os(macOS)
+            ComposeWindowHost.shared.willClose = { autosaveIfDirty() }
+            #endif
+        }
+        .onDisappear { autosaveIfDirty() }
+        .task {
+            // Periodic autosave, torn down with the view.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                autosaveIfDirty()
+            }
+        }
+    }
+
+    // MARK: - Autosave
+
+    /// What the draft would be saved as right now. `captureBody()` first.
+    private func fingerprint() -> String {
+        captureBody()
+        return [draft.to, draft.cc, draft.bcc, draft.subject, draft.bodyHTML,
+                draft.attachments.map(\.id).joined(separator: ",")]
+            .joined(separator: "\u{1}")
+    }
+
+    /// Saves silently when the content has changed since the last write —
+    /// covers the 30 s tick, the red close button, and the sheet dismissing.
+    private func autosaveIfDirty() {
+        guard !closing else { return }
+        let fp = fingerprint()
+        guard fp != savedFingerprint else { return }
+        savedFingerprint = fp
+        let snapshot = draft
+        Task {
+            if let ids = await model.persistDraft(snapshot, quiet: true) {
+                // Feed the ids back so the next tick updates in place; the
+                // message id is new after every update.
+                draft.gmailDraftId = ids.draftId
+                draft.draftMessageId = ids.messageId
+            } else {
+                savedFingerprint = ""  // failed — retry on the next tick
+            }
         }
     }
 
@@ -441,6 +498,7 @@ struct ComposeView: View {
     }
 
     private func sendAt(_ date: Date?) {
+        closing = true
         captureBody()
         model.send(draft: draft, at: date)
         close()

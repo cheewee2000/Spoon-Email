@@ -749,29 +749,44 @@ final class AppModel: ObservableObject {
     /// Saves the compose sheet's content to Gmail as a draft. Editing an
     /// existing draft updates it in place; otherwise a new draft is created.
     func saveDraft(_ d: ComposeDraft) {
-        Task {
-            do {
-                let raw = MimeBuilder.build(
-                    fromEmail: accountEmail(d.accountId),
-                    to: d.to, cc: d.cc, bcc: d.bcc,
-                    subject: d.subject, bodyText: d.body, bodyHTML: d.bodyHTML,
-                    quotedText: d.quotedText, quotedHTML: d.quotedHTML,
-                    attachments: d.attachments,
-                    inReplyTo: d.inReplyTo, references: d.references)
-                let client = accountStore.client(for: d.accountId)
-                var updated = false
-                if !d.draftMessageId.isEmpty {
-                    updated = try await client.updateDraft(
-                        messageId: d.draftMessageId, raw: raw, threadId: d.threadId)
-                }
-                if !updated {
-                    try await client.createDraft(raw: raw, threadId: d.threadId)
-                }
+        Task { await persistDraft(d) }
+    }
+
+    /// Writes the draft to Gmail and returns the ids it lives under now —
+    /// the message id changes on every update, so autosave feeds the result
+    /// back into the open composer. nil when the save failed. `quiet` skips
+    /// the toast and the immediate re-sync (autosave ticks).
+    @discardableResult
+    func persistDraft(_ d: ComposeDraft, quiet: Bool = false) async -> (draftId: String, messageId: String)? {
+        do {
+            let raw = MimeBuilder.build(
+                fromEmail: accountEmail(d.accountId),
+                to: d.to, cc: d.cc, bcc: d.bcc,
+                subject: d.subject, bodyText: d.body, bodyHTML: d.bodyHTML,
+                quotedText: d.quotedText, quotedHTML: d.quotedHTML,
+                attachments: d.attachments,
+                inReplyTo: d.inReplyTo, references: d.references)
+            let client = accountStore.client(for: d.accountId)
+            var result: (draftId: String, messageId: String)?
+            if !d.gmailDraftId.isEmpty {
+                result = try await client.updateDraft(
+                    draftId: d.gmailDraftId, raw: raw, threadId: d.threadId)
+            }
+            if result == nil, !d.draftMessageId.isEmpty {
+                result = try await client.updateDraft(
+                    messageId: d.draftMessageId, raw: raw, threadId: d.threadId)
+            }
+            if result == nil {
+                result = try await client.createDraft(raw: raw, threadId: d.threadId)
+            }
+            if !quiet {
                 flash("Draft saved")
                 syncNow()
-            } catch {
-                lastError = "Save draft failed: \(error.localizedDescription)"
             }
+            return result
+        } catch {
+            lastError = "Save draft failed: \(error.localizedDescription)"
+            return nil
         }
     }
 

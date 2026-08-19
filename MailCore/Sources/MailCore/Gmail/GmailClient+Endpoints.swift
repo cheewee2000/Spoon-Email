@@ -142,22 +142,40 @@ public extension GmailClient {
         }
     }
 
-    func createDraft(raw: Data, threadId: String?) async throws {
-        struct R: Decodable { let id: String }
+    private struct DraftResponse: Decodable {
+        struct M: Decodable { let id: String }
+        let id: String
+        let message: M
+    }
+
+    /// Creates a draft and returns where it lives: the draft id is stable
+    /// across edits, the message id changes on every update.
+    func createDraft(raw: Data, threadId: String?) async throws -> (draftId: String, messageId: String) {
         var message: [String: Any] = ["raw": GmailClient.base64URLEncode(raw)]
         if let threadId { message["threadId"] = threadId }
-        let _: R = try await post("drafts", json: ["message": message])
+        let r: DraftResponse = try await post("drafts", json: ["message": message])
+        return (r.id, r.message.id)
     }
 
     /// Replaces the content of the draft wrapping `messageId`.
-    /// Returns false if that draft no longer exists (caller should create).
-    func updateDraft(messageId: String, raw: Data, threadId: String?) async throws -> Bool {
-        guard let id = try await draftId(forMessageId: messageId) else { return false }
-        struct R: Decodable { let id: String }
+    /// Returns nil if that draft no longer exists (caller should create).
+    func updateDraft(messageId: String, raw: Data, threadId: String?) async throws -> (draftId: String, messageId: String)? {
+        guard let id = try await draftId(forMessageId: messageId) else { return nil }
+        return try await updateDraft(draftId: id, raw: raw, threadId: threadId)
+    }
+
+    /// Replaces a draft's content by its stable draft id — the fast path for
+    /// autosave, which would otherwise re-list all drafts on every tick.
+    /// Returns the new message id, or nil if the draft was deleted meanwhile.
+    func updateDraft(draftId: String, raw: Data, threadId: String?) async throws -> (draftId: String, messageId: String)? {
         var message: [String: Any] = ["raw": GmailClient.base64URLEncode(raw)]
         if let threadId { message["threadId"] = threadId }
-        let _: R = try await put("drafts/\(id)", json: ["message": message])
-        return true
+        do {
+            let r: DraftResponse = try await put("drafts/\(draftId)", json: ["message": message])
+            return (r.id, r.message.id)
+        } catch MailError.http(404, _) {
+            return nil
+        }
     }
 
     /// Server-side search (for results beyond the local cache).

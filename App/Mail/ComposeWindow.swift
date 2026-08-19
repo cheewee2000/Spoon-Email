@@ -17,6 +17,9 @@ final class ComposeWindowHost: NSObject, NSWindowDelegate {
     /// Called when the window closes on its own (the red button), so the app
     /// can drop the draft it was showing.
     var onWindowClosed: (() -> Void)?
+    /// Called first on that same close, while the composer's state is still
+    /// alive — its chance to flush unsaved work into a draft.
+    var willClose: (() -> Void)?
 
     func show<Content: View>(_ content: Content, title: String) {
         let hosting = NSHostingController(rootView: content.cwtChrome())
@@ -50,6 +53,8 @@ final class ComposeWindowHost: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         window = nil
+        willClose?()
+        willClose = nil
         onWindowClosed?()
     }
 }
