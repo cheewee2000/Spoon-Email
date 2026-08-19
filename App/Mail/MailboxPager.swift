@@ -204,6 +204,7 @@ private struct ThreadPageList: View {
             ForEach(list.threads, id: \.key) { thread in
                 NavigationLink(value: thread) {
                     ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
+                        .collapsed(list.collapsing.contains(thread.key))
                 }
                 .listRowSeparatorTint(CWT.hairline)
                 .swipeActions(edge: .trailing) {
@@ -232,7 +233,6 @@ private struct ThreadPageList: View {
             }
         }
         .listStyle(.plain)
-        .animation(.easeInOut(duration: 0.28), value: list.threads.map(\.key))
         .scrollContentBackground(.hidden)
         .background(CWT.paper)
         .refreshable { await model.syncAndWait() }

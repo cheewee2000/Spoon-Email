@@ -181,11 +181,11 @@ private struct BoardColumn: View {
                     .buttonStyle(.plain)
                     .contextMenu { ThreadContextMenu(thread: thread) }
                     .hotkeyHoverTarget(thread, model: model)
-                    Hairline()
+                    .collapsed(list.collapsing.contains(thread.key))
+                    if !list.collapsing.contains(thread.key) { Hairline() }
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.28), value: list.threads.map(\.key))
         // Same trick the full-width list uses: row .onAppear can't be trusted
         // to fire, so page from the scroll position instead.
         .onScrollGeometryChange(for: Bool.self) { geo in

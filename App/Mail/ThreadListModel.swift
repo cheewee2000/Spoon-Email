@@ -54,8 +54,37 @@ final class ThreadListModel: ObservableObject {
             list.hidden[key] = Date()
             list.pendingApply?.cancel()
             list.pendingApply = nil
-            withAnimation(.easeInOut(duration: 0.28)) {
-                list.threads.removeAll { $0.key == key }
+            list.collapse(key)
+        }
+    }
+
+    /// Keys whose rows are mid-collapse: still in `threads` (so the row keeps
+    /// its identity and can animate its own height to zero) but drawn at
+    /// zero height. Removed from the array only once invisible.
+    ///
+    /// macOS List doesn't animate ForEach removals — a row deleted inside
+    /// withAnimation just vanishes between frames — so instead of animating
+    /// the diff, we animate the row's frame and then delete it silently.
+    @Published private(set) var collapsing: Set<String> = []
+    static let collapseDuration: TimeInterval = 0.25
+    private var deferredDelivery: [MailThread]?
+
+    private func collapse(_ key: String) {
+        withAnimation(.easeInOut(duration: Self.collapseDuration)) {
+            _ = collapsing.insert(key)
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64((Self.collapseDuration + 0.03) * 1_000_000_000))
+            guard let self else { return }
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) {
+                self.threads.removeAll { $0.key == key }
+                self.collapsing.remove(key)
+            }
+            if self.collapsing.isEmpty, let deferred = self.deferredDelivery {
+                self.deferredDelivery = nil
+                self.apply(deferred)
             }
         }
     }
@@ -119,6 +148,13 @@ final class ThreadListModel: ObservableObject {
     private var latest: [MailThread] = []
 
     private func apply(_ threads: [MailThread]) {
+        // A delivery landing mid-collapse would yank the shrinking row out
+        // (or, for a commit that hasn't landed yet, re-order under it). Hold
+        // it until the collapse finishes.
+        if !collapsing.isEmpty {
+            deferredDelivery = threads
+            return
+        }
         let threads = filtered(threads)
         latest = threads
         let sinceLast = Date().timeIntervalSince(lastApplied)

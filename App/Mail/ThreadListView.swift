@@ -25,6 +25,7 @@ struct ThreadListView: View {
         )) {
             ForEach(listModel.threads, id: \.key) { thread in
                 ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
+                    .collapsed(listModel.collapsing.contains(thread.key))
                     .tag(thread.key)
                     .listRowSeparatorTint(CWT.hairline)
                     .swipeActions(edge: .trailing) {
@@ -40,7 +41,6 @@ struct ThreadListView: View {
             }
         }
         .listStyle(.plain)
-        .animation(.easeInOut(duration: 0.28), value: listModel.threads.map(\.key))
         .scrollContentBackground(.hidden)
         .background(CWT.paper)
         .onKeyPress(phases: .down) { press in
@@ -112,6 +112,19 @@ extension View {
     /// applied to rows in both the full-width list and the board columns.
     func hotkeyHoverTarget(_ thread: MailThread, model: AppModel) -> some View {
         modifier(HotkeyHoverTarget(thread: thread, model: model))
+    }
+}
+
+extension View {
+    /// Row-collapse used when a thread is archived/trashed: height and
+    /// opacity go to zero (animated by the caller's transaction) while the
+    /// row keeps its identity, so the rows below slide up to fill the gap.
+    func collapsed(_ isCollapsed: Bool) -> some View {
+        self
+            .frame(height: isCollapsed ? 0 : nil, alignment: .top)
+            .clipped()
+            .opacity(isCollapsed ? 0 : 1)
+            .listRowInsets(isCollapsed ? EdgeInsets() : nil)
     }
 }
 
