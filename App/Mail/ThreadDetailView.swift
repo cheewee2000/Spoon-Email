@@ -10,9 +10,17 @@ struct ThreadDetailView: View {
     /// drive the pull-past-the-bottom gesture. Both nil on the Mac.
     var onArchive: (() -> Void)? = nil
     var nextThread: MailThread? = nil
+    var previousThread: MailThread? = nil
     var onPullNext: (() -> Void)? = nil
+    var onPullPrevious: (() -> Void)? = nil
     @StateObject private var detail = ThreadDetailModel()
+    /// Signed: positive = pulling past the bottom, negative = past the top.
     @State private var pullProgress: CGFloat = 0
+    /// Which way the last swap went, so the new thread slides in from the
+    /// side you pulled toward.
+    @State private var slideForward = true
+    /// Only a pull slides; a click in the list or j/k still swaps instantly.
+    @State private var slideArmed = false
 
     private func archive() {
         if let onArchive { onArchive() } else { model.archive(thread) }
@@ -32,6 +40,31 @@ struct ThreadDetailView: View {
     }
 
     var body: some View {
+        content
+            .id(thread.key)
+            .transition(.asymmetric(
+                insertion: .move(edge: slideForward ? .bottom : .top),
+                removal: .move(edge: slideForward ? .top : .bottom)))
+            .animation(slideArmed ? .easeInOut(duration: 0.28) : nil, value: thread.key)
+            .clipped()
+            .onAppear {
+                detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
+                if thread.isUnread {
+                    model.markRead(thread, read: true, recordUndo: false)
+                }
+            }
+            .onChange(of: thread.key) {
+                detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
+                if thread.isUnread {
+                    model.markRead(thread, read: true, recordUndo: false)
+                }
+                if slideArmed {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { slideArmed = false }
+                }
+            }
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -137,42 +170,36 @@ struct ThreadDetailView: View {
                 onPull: { progress in
                     if pullProgress != progress { pullProgress = progress }
                 },
-                onPullNext: onPullNext
+                onPullNext: onPullNext.map { go in { slideForward = true; slideArmed = true; go() } },
+                onPullPrevious: onPullPrevious.map { go in { slideForward = false; slideArmed = true; go() } }
             )
-            #if os(iOS)
-            .overlay(alignment: .bottom) { pullHint }
-            #endif
-        }
-        .onAppear {
-            detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
-            if thread.isUnread {
-                model.markRead(thread, read: true, recordUndo: false)
-            }
-        }
-        .onChange(of: thread.key) {
-            detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
-            if thread.isUnread {
-                model.markRead(thread, read: true, recordUndo: false)
-            }
+            .overlay(alignment: .bottom) { pullHint(forward: true) }
+            .overlay(alignment: .top) { pullHint(forward: false) }
         }
     }
 
-    #if os(iOS)
-    /// Rises out of the bottom edge as you pull past the end of the thread:
-    /// what's next, and whether you've pulled far enough to go there.
-    @ViewBuilder private var pullHint: some View {
-        if pullProgress > 0, onPullNext != nil {
+    /// Rises out of the edge you're pulling past: what's next (or previous),
+    /// and whether you've pulled far enough to go there.
+    @ViewBuilder private func pullHint(forward: Bool) -> some View {
+        let progress = forward ? pullProgress : -pullProgress
+        let target = forward ? nextThread : previousThread
+        let enabled = forward ? onPullNext != nil : onPullPrevious != nil
+        if progress > 0, enabled {
             HStack(spacing: 6) {
-                if let nextThread {
-                    Image(systemName: pullProgress >= 1 ? "arrow.down.to.line" : "arrow.down")
+                if let target {
+                    Image(systemName: progress >= 1
+                          ? (forward ? "arrow.down.to.line" : "arrow.up.to.line")
+                          : (forward ? "arrow.down" : "arrow.up"))
                         .imageScale(.small)
-                    Text(pullProgress >= 1 ? "Release for next" : "Pull for next")
+                    Text(progress >= 1
+                         ? (forward ? "Release for next" : "Release for previous")
+                         : (forward ? "Pull for next" : "Pull for previous"))
                     Text("·").foregroundStyle(CWT.ink3)
-                    Text(nextThread.subject.isEmpty ? "(no subject)" : nextThread.subject)
+                    Text(target.subject.isEmpty ? "(no subject)" : target.subject)
                         .lineLimit(1)
                         .foregroundStyle(CWT.ink2)
                 } else {
-                    Text("No more conversations")
+                    Text(forward ? "No more conversations" : "Already at the first conversation")
                         .foregroundStyle(CWT.ink3)
                 }
             }
@@ -181,12 +208,11 @@ struct ThreadDetailView: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity)
             .background(CWT.paper)
-            .overlay(alignment: .top) { Hairline() }
-            .opacity(Double(min(1, pullProgress * 1.5)))
+            .overlay(alignment: forward ? .top : .bottom) { Hairline() }
+            .opacity(Double(min(1, progress * 1.5)))
             .allowsHitTesting(false)
         }
     }
-    #endif
 }
 
 enum ThreadHTML {
@@ -369,6 +395,18 @@ enum ThreadHTML {
           } catch (err) {}
           window.location.href = href;
         }
+        // Tell the native side whether the page is scrolled to its end — the
+        // Mac's pull-for-next can't read the web view's scroll position.
+        function postScroll() {
+          try {
+            var end = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+            var start = window.scrollY <= 2;
+            window.webkit.messageHandlers.sdhScroll.postMessage((end ? 1 : 0) + (start ? 2 : 0));
+          } catch (err) {}
+        }
+        window.addEventListener('scroll', postScroll, { passive: true });
+        window.addEventListener('load', postScroll);
+        if (window.ResizeObserver) new ResizeObserver(postScroll).observe(document.body);
         function toggleMsg(hdr) {
           hdr.parentElement.classList.toggle('collapsed');
           setTimeout(fitAll, 0);
@@ -646,10 +684,12 @@ struct MessageWebView: NSViewRepresentable {
     /// iOS-only pull-for-next hooks; accepted here so the call site is shared.
     var onPull: ((CGFloat) -> Void)?
     var onPullNext: (() -> Void)?
+    var onPullPrevious: (() -> Void)?
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.userContentController.add(context.coordinator, name: "sdhOpen")
+        config.userContentController.add(context.coordinator, name: "sdhScroll")
         // Parent page JS sizes the message iframes; email content itself
         // stays script-free (iframe sandbox has no allow-scripts).
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -657,6 +697,7 @@ struct MessageWebView: NSViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
+        context.coordinator.watchPull(on: view)
         return view
     }
 
@@ -666,6 +707,9 @@ struct MessageWebView: NSViewRepresentable {
         context.coordinator.onDeleteDraft = onDeleteDraft
         context.coordinator.onMailto = onMailto
         context.coordinator.onAction = onAction
+        context.coordinator.onPull = onPull
+        context.coordinator.onPullNext = onPullNext
+        context.coordinator.onPullPrevious = onPullPrevious
         if context.coordinator.needsLoad(html) {
             context.coordinator.load(html, into: view)
         }
@@ -683,6 +727,7 @@ struct MessageWebView: UIViewRepresentable {
     var onAction: ((String) -> Void)?
     var onPull: ((CGFloat) -> Void)?
     var onPullNext: (() -> Void)?
+    var onPullPrevious: (() -> Void)?
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -708,6 +753,7 @@ struct MessageWebView: UIViewRepresentable {
         context.coordinator.onAction = onAction
         context.coordinator.onPull = onPull
         context.coordinator.onPullNext = onPullNext
+        context.coordinator.onPullPrevious = onPullPrevious
         if context.coordinator.needsLoad(html) {
             context.coordinator.load(html, into: view)
         }
@@ -777,15 +823,73 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     var onAction: ((String) -> Void)?
     var onPull: ((CGFloat) -> Void)?
     var onPullNext: (() -> Void)?
+    var onPullPrevious: (() -> Void)?
 
-    #if os(iOS)
     /// How far past the end of the page the finger has to drag before
     /// letting go moves on to the next conversation.
     private static let pullDistance: CGFloat = 80
     private var pullArmed = false
     private var pullProgress: CGFloat = 0
+    /// The page reports whether it's scrolled to its end / start (sdhScroll).
+    private var atEnd = false
+    private var atStart = false
+
+    #if os(macOS)
+    private var scrollMonitor: Any?
+    private var pulledDistance: CGFloat = 0
+
+    deinit {
+        if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+    }
+
+    /// Trackpad pull past the end of the thread → next. WKWebView on the Mac
+    /// hides its scroll view, so listen to the scroll-wheel gesture directly:
+    /// finger-driven phases only (no momentum), counting only while the page
+    /// says it's at its end, committing when the fingers lift.
+    func watchPull(on view: WKWebView) {
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self, weak view] event in
+            guard let self, let view, event.window === view.window,
+                  view.bounds.contains(view.convert(event.locationInWindow, from: nil))
+            else { return event }
+            switch event.phase {
+            case .began:
+                pulledDistance = 0
+                pullArmed = false
+            case .changed:
+                guard event.momentumPhase == [] else { break }
+                // Negative scrollingDeltaY = content moving up = pulling the
+                // bottom; positive = pulling the top. Only counts while the
+                // page is already at that edge.
+                let d = -event.scrollingDeltaY
+                if d < 0 && atStart {
+                    pulledDistance = min(0, pulledDistance + d)
+                } else if d > 0 && atEnd {
+                    pulledDistance = max(0, pulledDistance + d)
+                } else if (d < 0 && !atStart) || (d > 0 && !atEnd) {
+                    pulledDistance = 0
+                }
+                let progress = max(-1, min(1, pulledDistance / (Self.pullDistance * 2)))
+                pullArmed = abs(progress) >= 1
+                report(progress)
+            case .ended, .cancelled:
+                let fire = pullArmed && event.phase == .ended
+                let forward = pulledDistance > 0
+                pullArmed = false
+                pulledDistance = 0
+                report(0)
+                if fire { forward ? onPullNext?() : onPullPrevious?() }
+            default:
+                break
+            }
+            return event
+        }
+    }
+    #endif
+
+    #if os(iOS)
 
     private var offsetObservation: NSKeyValueObservation?
+    private var pullForward = true
 
     func watchPull(on scrollView: UIScrollView) {
         offsetObservation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] sv, _ in
@@ -797,24 +901,32 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     /// scroll view while the finger is down; the finger lifting is what
     /// commits (the bounce-back is what brings us here with isTracking off).
     private func scrolled(_ sv: UIScrollView) {
-        let maxOffset = max(-sv.adjustedContentInset.top,
+        let minOffset = -sv.adjustedContentInset.top
+        let maxOffset = max(minOffset,
                             sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
-        let over = sv.contentOffset.y - maxOffset
+        // Signed overscroll: past the bottom is positive, past the top negative.
+        let over: CGFloat
+        if sv.contentOffset.y > maxOffset { over = sv.contentOffset.y - maxOffset }
+        else if sv.contentOffset.y < minOffset { over = sv.contentOffset.y - minOffset }
+        else { over = 0 }
         if sv.isTracking {
-            let progress = min(1, max(0, over / Self.pullDistance))
-            let armed = progress >= 1
+            let progress = max(-1, min(1, over / Self.pullDistance))
+            let armed = abs(progress) >= 1
             if armed != pullArmed {
                 pullArmed = armed
                 if armed { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             }
+            pullForward = progress > 0
             report(progress)
         } else {
             let fire = pullArmed
             pullArmed = false
             report(0)
-            if fire { onPullNext?() }
+            if fire { pullForward ? onPullNext?() : onPullPrevious?() }
         }
     }
+
+    #endif
 
     private func report(_ progress: CGFloat) {
         // Throttle: the parent view re-renders on every change.
@@ -822,7 +934,6 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         pullProgress = progress
         onPull?(progress)
     }
-    #endif
 
     /// Opens a link outside the app: mail addresses go to our own composer,
     /// everything else to the default browser in its own window.
@@ -848,6 +959,12 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     /// The page's click forwarder posts every link here.
     func userContentController(_ controller: WKUserContentController,
                                didReceive message: WKScriptMessage) {
+        if message.name == "sdhScroll" {
+            let bits = (message.body as? Int) ?? 0
+            atEnd = bits & 1 != 0
+            atStart = bits & 2 != 0
+            return
+        }
         guard message.name == "sdhOpen",
               let href = message.body as? String,
               let url = URL(string: href) else { return }

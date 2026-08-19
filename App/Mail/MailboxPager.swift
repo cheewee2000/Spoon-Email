@@ -222,6 +222,12 @@ private struct ThreadReader: View {
         return position < threads.count ? threads[position] : nil
     }
 
+    private var previous: MailThread? {
+        let threads = list.threads
+        let idx = threads.firstIndex(where: { $0.key == current.key }) ?? position
+        return idx > 0 && idx - 1 < threads.count ? threads[idx - 1] : nil
+    }
+
     var body: some View {
         ThreadDetailView(thread: current,
                          onArchive: {
@@ -230,7 +236,9 @@ private struct ThreadReader: View {
                              model.archive(leaving)
                          },
                          nextThread: next,
-                         onPullNext: { advance(orDismiss: false) })
+                         previousThread: previous,
+                         onPullNext: { advance(orDismiss: false) },
+                         onPullPrevious: { retreat() })
             .onAppear { track() }
             .onChange(of: list.threads) { track() }
     }
@@ -241,6 +249,12 @@ private struct ThreadReader: View {
         }
         // Keep a page of threads ahead of the reader.
         if list.threads.count - position < 10 { list.loadMore(db: model.db) }
+    }
+
+    private func retreat() {
+        guard let previous else { return }
+        position = list.threads.firstIndex { $0.key == previous.key } ?? position
+        current = previous
     }
 
     private func advance(orDismiss: Bool) {

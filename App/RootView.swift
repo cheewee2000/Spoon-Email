@@ -228,7 +228,11 @@ struct RootView: View {
                 #endif
         } detail: {
             if let thread = model.selectedThread {
-                ThreadDetailView(thread: thread)
+                ThreadDetailView(thread: thread,
+                                 nextThread: neighbor(of: thread, offset: 1),
+                                 previousThread: neighbor(of: thread, offset: -1),
+                                 onPullNext: { model.selectNext(in: listModel.threads) },
+                                 onPullPrevious: { model.selectPrevious(in: listModel.threads) })
             } else {
                 Text("Select a conversation")
                     .font(CWT.caption)
@@ -237,6 +241,14 @@ struct RootView: View {
                     .background(CWT.paper)
             }
         }
+    }
+
+    /// What pulling past the bottom (+1) or top (-1) of the reader moves to.
+    private func neighbor(of thread: MailThread, offset: Int) -> MailThread? {
+        let threads = listModel.threads
+        guard let idx = threads.firstIndex(where: { $0.key == thread.key }),
+              threads.indices.contains(idx + offset) else { return nil }
+        return threads[idx + offset]
     }
 
     /// Single-key triage shortcuts, active no matter what has focus (thread
