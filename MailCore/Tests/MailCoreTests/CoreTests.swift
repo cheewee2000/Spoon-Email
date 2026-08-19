@@ -639,3 +639,24 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(shell, 0, "a draft-only thread must disappear once the draft is sent")
     }
 }
+
+final class MimeMixedTests: XCTestCase {
+    func testFileAttachmentWrapsInMixedAndInlineInRelated() {
+        let inline = ComposeAttachment(id: "img@spoon.local", filename: "a.png", mimeType: "image/png", data: Data([1]), isInline: true)
+        let file = ComposeAttachment(filename: "doc.pdf", mimeType: "application/pdf", data: Data([2]), isInline: false)
+        let raw = String(decoding: MimeBuilder.build(fromEmail: "a@b.c", to: "d@e.f", cc: "", bcc: "", subject: "s",
+                                                      bodyText: "hi", attachments: [inline, file],
+                                                      inReplyTo: "", references: ""), as: UTF8.self)
+        XCTAssertTrue(raw.contains("Content-Type: multipart/mixed; boundary=\"sdh-mix-"))
+        XCTAssertTrue(raw.contains("Content-Type: multipart/related;"))
+        XCTAssertTrue(raw.contains("Content-Disposition: attachment; filename=\"doc.pdf\""))
+        XCTAssertTrue(raw.contains("Content-ID: <img@spoon.local>"))
+        XCTAssertEqual(raw.components(separatedBy: "--sdh-mix-").count, 4) // open, related part, pdf part, close
+        // File-only: no related layer at all
+        let onlyFile = String(decoding: MimeBuilder.build(fromEmail: "a@b.c", to: "d@e.f", cc: "", bcc: "", subject: "s",
+                                                          bodyText: "hi", attachments: [file],
+                                                          inReplyTo: "", references: ""), as: UTF8.self)
+        XCTAssertFalse(onlyFile.contains("multipart/related"))
+        XCTAssertTrue(onlyFile.contains("multipart/mixed"))
+    }
+}

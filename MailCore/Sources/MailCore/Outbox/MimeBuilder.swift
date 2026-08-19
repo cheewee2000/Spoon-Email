@@ -11,6 +11,9 @@ public enum MimeBuilder {
                              date: Date = Date()) -> Data {
         let boundary = "sdh-" + UUID().uuidString
         let relatedBoundary = "sdh-rel-" + UUID().uuidString
+        let mixedBoundary = "sdh-mix-" + UUID().uuidString
+        let inline = attachments.filter(\.isInline)
+        let files = attachments.filter { !$0.isInline }
         var headers: [String] = []
         headers.append("From: \(fromEmail)")
         headers.append("To: \(to)")
@@ -22,13 +25,18 @@ public enum MimeBuilder {
         if !inReplyTo.isEmpty { headers.append("In-Reply-To: \(inReplyTo)") }
         if !references.isEmpty { headers.append("References: \(references)") }
         headers.append("MIME-Version: 1.0")
-        // With attachments the alternative body becomes the first part of a
-        // multipart/related, so the inline images resolve against their cid.
-        if attachments.isEmpty {
-            headers.append("Content-Type: multipart/alternative; boundary=\"\(boundary)\"")
+        // Nesting, outermost first: multipart/mixed (only with file
+        // attachments) > multipart/related (only with inline images, so they
+        // resolve against their cid) > multipart/alternative (always).
+        let relatedHeader = "Content-Type: multipart/related; "
+            + "boundary=\"\(relatedBoundary)\"; type=\"multipart/alternative\""
+        let alternativeHeader = "Content-Type: multipart/alternative; boundary=\"\(boundary)\""
+        if !files.isEmpty {
+            headers.append("Content-Type: multipart/mixed; boundary=\"\(mixedBoundary)\"")
+        } else if !inline.isEmpty {
+            headers.append(relatedHeader)
         } else {
-            headers.append("Content-Type: multipart/related; "
-                + "boundary=\"\(relatedBoundary)\"; type=\"multipart/alternative\"")
+            headers.append(alternativeHeader)
         }
 
         // The composer sends rich HTML for what was typed; plain text is the
@@ -52,9 +60,14 @@ public enum MimeBuilder {
 
         var lines: [String] = headers
         lines.append("")
-        if !attachments.isEmpty {
+        if !files.isEmpty {
+            lines.append("--\(mixedBoundary)")
+            lines.append(inline.isEmpty ? alternativeHeader : relatedHeader)
+            lines.append("")
+        }
+        if !inline.isEmpty {
             lines.append("--\(relatedBoundary)")
-            lines.append("Content-Type: multipart/alternative; boundary=\"\(boundary)\"")
+            lines.append(alternativeHeader)
             lines.append("")
         }
         lines.append("--\(boundary)")
@@ -69,18 +82,21 @@ public enum MimeBuilder {
         lines.append(base64Wrapped(html))
         lines.append("--\(boundary)--")
 
-        for attachment in attachments {
+        func appendPart(_ attachment: ComposeAttachment, boundary: String) {
             let name = encodeHeader(attachment.filename)
-            lines.append("--\(relatedBoundary)")
+            lines.append("--\(boundary)")
             lines.append("Content-Type: \(attachment.mimeType); name=\"\(name)\"")
             lines.append("Content-Transfer-Encoding: base64")
-            lines.append("Content-ID: <\(attachment.id)>")
+            if attachment.isInline { lines.append("Content-ID: <\(attachment.id)>") }
             lines.append("Content-Disposition: \(attachment.isInline ? "inline" : "attachment")"
                 + "; filename=\"\(name)\"")
             lines.append("")
             lines.append(base64Wrapped(attachment.data))
         }
-        if !attachments.isEmpty { lines.append("--\(relatedBoundary)--") }
+        for attachment in inline { appendPart(attachment, boundary: relatedBoundary) }
+        if !inline.isEmpty { lines.append("--\(relatedBoundary)--") }
+        for attachment in files { appendPart(attachment, boundary: mixedBoundary) }
+        if !files.isEmpty { lines.append("--\(mixedBoundary)--") }
 
         return Data(lines.joined(separator: "\r\n").utf8)
     }

@@ -156,3 +156,53 @@ enum InlineImageLoader {
         return out as Data
     }
 }
+
+
+/// Reads non-image drops (PDFs, zips, documents…) into regular attachments.
+/// Mirrors `InlineImageLoader` but keeps the bytes as they are.
+enum FileAttachmentLoader {
+    /// Anything that is a file's worth of data. Folders and promises (which
+    /// only conform to `item`) are left to bounce back.
+    static func supported(_ provider: NSItemProvider) -> Bool {
+        provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+            || provider.hasItemConformingToTypeIdentifier(UTType.data.identifier)
+    }
+
+    static func load(_ providers: [NSItemProvider]) async -> [ComposeAttachment] {
+        var out: [ComposeAttachment] = []
+        for provider in providers where supported(provider) {
+            guard let (data, name) = await rawData(provider), !data.isEmpty else { continue }
+            let ext = (name as NSString).pathExtension
+            let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+            out.append(ComposeAttachment(filename: name.isEmpty ? "attachment" : name,
+                                         mimeType: mime, data: data, isInline: false))
+        }
+        return out
+    }
+
+    /// The most specific registered type that is real data — a Finder drop
+    /// registers the file's own type ahead of `public.file-url`, so asking
+    /// for that one gets the file itself rather than a URL blob.
+    private static func rawData(_ provider: NSItemProvider) async -> (Data, String)? {
+        let concrete = provider.registeredTypeIdentifiers
+            .compactMap { UTType($0) }
+            .first { $0.conforms(to: .data) && !$0.conforms(to: .url) }
+        let typeId = concrete?.identifier ?? UTType.data.identifier
+        let fallbackName = provider.suggestedName ?? ""
+        return await withCheckedContinuation { continuation in
+            var resumed = false
+            let finish: ((Data, String)?) -> Void = { result in
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: result)
+            }
+            _ = provider.loadFileRepresentation(forTypeIdentifier: typeId) { url, _ in
+                guard let url, let data = try? Data(contentsOf: url) else {
+                    finish(nil)
+                    return
+                }
+                finish((data, fallbackName.isEmpty ? url.lastPathComponent : fallbackName))
+            }
+        }
+    }
+}

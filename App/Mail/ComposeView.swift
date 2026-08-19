@@ -35,6 +35,8 @@ struct ComposeView: View {
     @State private var linkURL = ""
     @State private var isDropTargeted = false
     @State private var dropError: String?
+    /// Files dropped on the window, sent as regular (non-inline) attachments.
+    @State private var files: [ComposeAttachment] = []
     @StateObject private var rich = RichTextController()
     @FocusState private var focus: Field?
 
@@ -75,54 +77,10 @@ struct ComposeView: View {
                         .labelsHidden()
                     }
                 }
-                GridRow {
-                    SectionLabel(text: "To")
-                        .frame(width: Self.labelWidth, alignment: .trailing)
-                    TextField("", text: $draft.to)
-                        .textFieldStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .focused($focus, equals: .to)
-                        .onChange(of: draft.to) { updateSuggestions() }
-                        .autocorrectionDisabled()
-                        #if os(iOS)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                }
-                if !suggestions.isEmpty && focus == .to {
-                    GridRow {
-                        Color.clear.frame(width: Self.labelWidth, height: 0)
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(suggestions, id: \.email) { s in
-                                Button {
-                                    applySuggestion(s)
-                                } label: {
-                                    Text("\(s.name) <\(s.email)>")
-                                        .font(CWT.caption)
-                                        .lineLimit(1)
-                                }
-                                .buttonStyle(.textAction(CWT.ink2))
-                            }
-                        }
-                    }
-                }
+                recipientRows("To", text: $draft.to, field: .to)
                 if showCcBcc {
-                    GridRow {
-                        SectionLabel(text: "Cc")
-                            .frame(width: Self.labelWidth, alignment: .trailing)
-                        TextField("", text: $draft.cc)
-                            .textFieldStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .focused($focus, equals: .cc)
-                    }
-                    GridRow {
-                        SectionLabel(text: "Bcc")
-                            .frame(width: Self.labelWidth, alignment: .trailing)
-                        TextField("", text: $draft.bcc)
-                            .textFieldStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .focused($focus, equals: .bcc)
-                    }
+                    recipientRows("Cc", text: $draft.cc, field: .cc)
+                    recipientRows("Bcc", text: $draft.bcc, field: .bcc)
                 } else {
                     GridRow {
                         Color.clear.frame(width: Self.labelWidth, height: 0)
@@ -172,6 +130,10 @@ struct ComposeView: View {
                 .padding(.vertical, 6)
             }
             Hairline()
+            if !files.isEmpty {
+                attachmentStrip
+                Hairline()
+            }
             if let dropError {
                 Text(dropError)
                     .font(CWT.caption)
@@ -223,7 +185,7 @@ struct ComposeView: View {
         #if os(macOS)
         .frame(minWidth: 560, minHeight: 440)
         #endif
-        .onDrop(of: [.image], isTargeted: $isDropTargeted) { providers in
+        .onDrop(of: [.image, .fileURL, .data], isTargeted: $isDropTargeted) { providers in
             receive(providers)
         }
         .overlay {
@@ -232,7 +194,7 @@ struct ComposeView: View {
                     .strokeBorder(CWT.ink, style: StrokeStyle(lineWidth: 1, dash: [4]))
                     .background(CWT.ink.opacity(0.04))
                     .overlay(
-                        Text("Drop image to insert")
+                        Text("Drop images to insert, files to attach")
                             .font(CWT.caption)
                             .foregroundStyle(CWT.paper)
                             .padding(6)
@@ -243,6 +205,7 @@ struct ComposeView: View {
             }
         }
         .onAppear {
+            files = draft.attachments.filter { !$0.isInline }
             if !draft.cc.isEmpty || !draft.bcc.isEmpty { showCcBcc = true }
             focus = draft.to.isEmpty ? .to : .body
         }
@@ -253,6 +216,80 @@ struct ComposeView: View {
     private var isBoundToAccount: Bool {
         draft.threadId != nil || !draft.draftMessageId.isEmpty
     }
+
+    /// One address line plus, while it has focus, the contact matches for
+    /// whatever is being typed after the last comma. Same lookup for To, Cc
+    /// and Bcc — the list follows the caret.
+    @ViewBuilder
+    private func recipientRows(_ label: String, text: Binding<String>, field: Field) -> some View {
+        GridRow {
+            SectionLabel(text: label)
+                .frame(width: Self.labelWidth, alignment: .trailing)
+            TextField("", text: text)
+                .textFieldStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .focused($focus, equals: field)
+                .onChange(of: text.wrappedValue) { updateSuggestions(for: field) }
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                #endif
+        }
+        if !suggestions.isEmpty && focus == field {
+            GridRow {
+                Color.clear.frame(width: Self.labelWidth, height: 0)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(suggestions, id: \.email) { s in
+                        Button {
+                            applySuggestion(s, to: field)
+                        } label: {
+                            Text("\(s.name) <\(s.email)>")
+                                .font(CWT.caption)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.textAction(CWT.ink2))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Dropped files, each with its size and an × to pull it back out.
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(files) { file in
+                    HStack(spacing: 4) {
+                        Image(systemName: "paperclip").font(.system(size: 10))
+                        Text(file.filename).lineLimit(1).truncationMode(.middle)
+                        Text(Self.byteFormatter.string(fromByteCount: Int64(file.data.count)))
+                            .foregroundStyle(CWT.ink3)
+                        Button {
+                            files.removeAll { $0.id == file.id }
+                        } label: {
+                            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove attachment")
+                    }
+                    .font(CWT.caption)
+                    .foregroundStyle(CWT.ink2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .overlay(Rectangle().strokeBorder(CWT.hairline, lineWidth: 1))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f
+    }()
 
     /// Rich-text formatting for the body. The editor also takes the standard
     /// system shortcuts, so these are the discoverable version.
@@ -325,17 +362,25 @@ struct ComposeView: View {
     /// bounces back instead of silently vanishing.
     private func receive(_ providers: [NSItemProvider]) -> Bool {
         let images = providers.filter(InlineImageLoader.supported)
-        guard !images.isEmpty else { return false }
+        let others = providers.filter { !InlineImageLoader.supported($0) && FileAttachmentLoader.supported($0) }
+        guard !images.isEmpty || !others.isEmpty else { return false }
         Task {
-            let loaded = await InlineImageLoader.load(images)
-            guard !loaded.isEmpty else {
-                dropError = "Couldn't read that image."
-                return
-            }
             dropError = nil
-            for (payload, image) in loaded {
-                guard fits(payload) else { break }
-                rich.insert(image: InlineImageAttachment(payload: payload, image: image))
+            if !images.isEmpty {
+                let loaded = await InlineImageLoader.load(images)
+                if loaded.isEmpty { dropError = "Couldn't read that image." }
+                for (payload, image) in loaded {
+                    guard fits(payload) else { break }
+                    rich.insert(image: InlineImageAttachment(payload: payload, image: image))
+                }
+            }
+            if !others.isEmpty {
+                let loaded = await FileAttachmentLoader.load(others)
+                if loaded.isEmpty { dropError = "Couldn't read that file." }
+                for file in loaded {
+                    guard fits(file) else { break }
+                    files.append(file)
+                }
             }
         }
         return true
@@ -344,9 +389,9 @@ struct ComposeView: View {
     /// Guards the message against outgrowing what Gmail will take. Counts what
     /// is already in the body, since images arrive one drop at a time.
     private func fits(_ candidate: ComposeAttachment) -> Bool {
-        let used = RichHTML.attachments(in: richBody).reduce(0) { $0 + $1.data.count }
+        let used = (RichHTML.attachments(in: richBody) + files).reduce(0) { $0 + $1.data.count }
         guard used + candidate.data.count <= ComposeAttachment.totalByteLimit else {
-            dropError = "That image would push the message past "
+            dropError = "\(candidate.filename) would push the message past "
                 + "\(ComposeAttachment.totalByteLimit / 1_000_000) MB — it wasn't added."
             return false
         }
@@ -357,7 +402,7 @@ struct ComposeView: View {
     private func captureBody() {
         draft.body = RichHTML.plainText(from: richBody)
         draft.bodyHTML = RichHTML.html(from: richBody)
-        draft.attachments = RichHTML.attachments(in: richBody)
+        draft.attachments = RichHTML.attachments(in: richBody) + files
     }
 
     private func quotedPreviewDoc(_ html: String) -> String {
@@ -384,8 +429,24 @@ struct ComposeView: View {
         return date
     }
 
-    private func updateSuggestions() {
-        let query = draft.to.components(separatedBy: ",").last?
+    private func recipientText(_ field: Field) -> String {
+        switch field {
+        case .cc: return draft.cc
+        case .bcc: return draft.bcc
+        default: return draft.to
+        }
+    }
+
+    private func setRecipientText(_ field: Field, _ value: String) {
+        switch field {
+        case .cc: draft.cc = value
+        case .bcc: draft.bcc = value
+        default: draft.to = value
+        }
+    }
+
+    private func updateSuggestions(for field: Field) {
+        let query = recipientText(field).components(separatedBy: ",").last?
             .trimmingCharacters(in: .whitespaces) ?? ""
         guard query.count >= 2 else {
             suggestions = []
@@ -395,16 +456,16 @@ struct ComposeView: View {
             let hits = await model.suggestContacts(query)
             // Keystrokes can finish out of order — only the lookup that
             // still matches what's typed gets to set the list.
-            let current = draft.to.components(separatedBy: ",").last?
+            let current = recipientText(field).components(separatedBy: ",").last?
                 .trimmingCharacters(in: .whitespaces) ?? ""
             if current == query { suggestions = hits }
         }
     }
 
-    private func applySuggestion(_ s: (name: String, email: String)) {
-        var parts = draft.to.components(separatedBy: ",")
+    private func applySuggestion(_ s: (name: String, email: String), to field: Field) {
+        var parts = recipientText(field).components(separatedBy: ",")
         parts[parts.count - 1] = " \(s.name) <\(s.email)>"
-        draft.to = parts.joined(separator: ",").trimmingCharacters(in: .whitespaces)
+        setRecipientText(field, parts.joined(separator: ",").trimmingCharacters(in: .whitespaces))
         suggestions = []
     }
 }
