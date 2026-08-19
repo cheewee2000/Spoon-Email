@@ -694,10 +694,9 @@ struct MessageWebView: UIViewRepresentable {
         view.isOpaque = false
         // Short threads still need to rubber-band, or there's nothing to pull.
         view.scrollView.alwaysBounceVertical = true
-        // Ride along on the scroll view's own pan rather than taking over its
-        // delegate (WebKit owns that).
-        view.scrollView.panGestureRecognizer.addTarget(
-            context.coordinator, action: #selector(WebCoordinator.pulled(_:)))
+        // Watch the offset rather than the scroll view's delegate (WebKit
+        // owns that) or its pan gesture (which never reported to us).
+        context.coordinator.watchPull(on: view.scrollView)
         return view
     }
 
@@ -786,15 +785,22 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     private var pullArmed = false
     private var pullProgress: CGFloat = 0
 
-    /// Pull-past-the-bottom → next thread. Reads the overscroll off the
-    /// scroll view while the finger is down; the release is what commits.
-    @objc func pulled(_ gr: UIPanGestureRecognizer) {
-        guard let sv = gr.view as? UIScrollView else { return }
-        switch gr.state {
-        case .changed:
-            let maxOffset = max(-sv.adjustedContentInset.top,
-                                sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
-            let over = sv.contentOffset.y - maxOffset
+    private var offsetObservation: NSKeyValueObservation?
+
+    func watchPull(on scrollView: UIScrollView) {
+        offsetObservation = scrollView.observe(\.contentOffset, options: [.new]) { [weak self] sv, _ in
+            self?.scrolled(sv)
+        }
+    }
+
+    /// Pull-past-the-bottom → next thread. The overscroll is read off the
+    /// scroll view while the finger is down; the finger lifting is what
+    /// commits (the bounce-back is what brings us here with isTracking off).
+    private func scrolled(_ sv: UIScrollView) {
+        let maxOffset = max(-sv.adjustedContentInset.top,
+                            sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
+        let over = sv.contentOffset.y - maxOffset
+        if sv.isTracking {
             let progress = min(1, max(0, over / Self.pullDistance))
             let armed = progress >= 1
             if armed != pullArmed {
@@ -802,16 +808,11 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                 if armed { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             }
             report(progress)
-        case .ended:
+        } else {
             let fire = pullArmed
             pullArmed = false
             report(0)
             if fire { onPullNext?() }
-        case .cancelled, .failed:
-            pullArmed = false
-            report(0)
-        default:
-            break
         }
     }
 
