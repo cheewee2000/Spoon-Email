@@ -19,8 +19,6 @@ struct ThreadDetailView: View {
     /// Which way the last swap went, so the new thread slides in from the
     /// side you pulled toward.
     @State private var slideForward = true
-    /// Only a pull slides; a click in the list or j/k still swaps instantly.
-    @State private var slideArmed = false
 
     private func archive() {
         if let onArchive { onArchive() } else { model.archive(thread) }
@@ -40,13 +38,17 @@ struct ThreadDetailView: View {
     }
 
     var body: some View {
-        content
-            .id(thread.key)
-            .transition(.asymmetric(
-                insertion: .move(edge: slideForward ? .bottom : .top),
-                removal: .move(edge: slideForward ? .top : .bottom)))
-            .animation(slideArmed ? .easeInOut(duration: 0.28) : nil, value: thread.key)
-            .clipped()
+        // The ZStack is the stage: on a pull the outgoing thread slides off one
+        // edge while the incoming one slides in from the other. Identity is
+        // the thread key, so a swap is a removal plus an insertion.
+        ZStack {
+            content
+                .id(thread.key)
+                .transition(.asymmetric(
+                    insertion: .move(edge: slideForward ? .bottom : .top),
+                    removal: .move(edge: slideForward ? .top : .bottom)))
+        }
+        .clipped()
             .onAppear {
                 detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
                 if thread.isUnread {
@@ -57,9 +59,6 @@ struct ThreadDetailView: View {
                 detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
                 if thread.isUnread {
                     model.markRead(thread, read: true, recordUndo: false)
-                }
-                if slideArmed {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { slideArmed = false }
                 }
             }
     }
@@ -170,8 +169,16 @@ struct ThreadDetailView: View {
                 onPull: { progress in
                     if pullProgress != progress { pullProgress = progress }
                 },
-                onPullNext: onPullNext.map { go in { slideForward = true; slideArmed = true; go() } },
-                onPullPrevious: onPullPrevious.map { go in { slideForward = false; slideArmed = true; go() } }
+                // Only a pull slides; a click in the list or j/k still swaps
+                // instantly, because only these go through withAnimation.
+                onPullNext: onPullNext.map { go in {
+                    slideForward = true
+                    withAnimation(.easeInOut(duration: 0.3)) { go() }
+                } },
+                onPullPrevious: onPullPrevious.map { go in {
+                    slideForward = false
+                    withAnimation(.easeInOut(duration: 0.3)) { go() }
+                } }
             )
             .overlay(alignment: .bottom) { pullHint(forward: true) }
             .overlay(alignment: .top) { pullHint(forward: false) }
