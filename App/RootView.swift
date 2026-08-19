@@ -185,27 +185,15 @@ struct RootView: View {
         sidebarHidden ? .detailOnly : .all
     }
 
-    /// The animated stage right of the rail: the board, or one mailbox (list
-    /// beside reader). Between two mailboxes the panes push sideways in rail
-    /// order; between board and mailbox they zoom — the board grows past the
-    /// eye while the mailbox rises from just behind it, so the board reads as
-    /// the layer nearest the camera (hence its zIndex during the crossover).
+    /// The one canvas right of the rail: the board of columns, which is also
+    /// the mailbox view — focusing a column shoves the others aside to make
+    /// room for the reader, so navigation is furniture moving, not screens
+    /// swapping. All the choreography lives in BoardView.
     private var mailCanvas: some View {
-        ZStack {
-            if let box = model.mailbox {
-                MailboxPane(box: box,
-                            searchText: $searchText,
-                            searchFocused: $searchFocused)
-                    .id(box)
-                    .transition(model.mailboxTransition)
-            } else {
-                BoardView(order: order)
-                    .transition(.boardLayer)
-                    .zIndex(1)
-            }
-        }
-        .clipped()
-        .background(CWT.paper)
+        BoardView(order: order,
+                  searchText: $searchText,
+                  searchFocused: $searchFocused)
+            .clipped()
     }
     #endif
 
@@ -619,125 +607,3 @@ struct AccountsSection: View {
         }
     }
 }
-
-#if os(macOS)
-/// One mailbox filling the canvas: the thread list beside the reader. Owns
-/// its own list model and is keyed by the mailbox, so during a
-/// mailbox-to-mailbox slide the outgoing pane keeps showing the mail it was
-/// showing instead of flashing the incoming mailbox's rows.
-private struct MailboxPane: View {
-    @EnvironmentObject var model: AppModel
-    let box: MailboxFilter
-    @Binding var searchText: String
-    var searchFocused: FocusState<Bool>.Binding
-    @StateObject private var list = ThreadListModel()
-    /// The list column's width, persisted. The native split-view column went
-    /// away with the custom canvas, so the rule between list and reader
-    /// drags to resize — same gesture as the board's column resizers.
-    @AppStorage("mailboxListWidth") private var listWidth = 340.0
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ThreadListView(listModel: list,
-                           selection: Binding(
-                               get: { model.selectedThread },
-                               set: { model.select($0) }),
-                           searchQuery: searchText.isEmpty ? nil : searchText)
-                .searchable(text: $searchText, prompt: "Search all mail")
-                .searchFocused(searchFocused)
-                .frame(width: listWidth)
-            ListResizer(width: $listWidth)
-            reader
-        }
-        .background(CWT.paper)
-        .navigationTitle(box.title)
-        .toolbar {
-            ToolbarItem {
-                Button {
-                    model.compose()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .help("Compose (C)")
-            }
-        }
-        .onAppear {
-            model.activeList = list
-            list.observe(db: model.db, filter: box)
-        }
-        .onChange(of: searchText) {
-            if searchText.isEmpty {
-                list.observe(db: model.db, filter: box)
-            } else {
-                list.observeSearch(db: model.db, query: searchText)
-            }
-        }
-    }
-
-    /// The placeholder sits underneath always; the reader slides in over it
-    /// from the right when a thread is selected, and back out when it isn't.
-    private var reader: some View {
-        ZStack {
-            Text("Select a conversation")
-                .font(CWT.caption)
-                .foregroundStyle(CWT.ink3)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(CWT.paper)
-            if let thread = model.selectedThread {
-                ThreadDetailView(thread: thread,
-                                 nextThread: neighbor(of: thread, offset: 1),
-                                 previousThread: neighbor(of: thread, offset: -1),
-                                 onPullNext: { model.selectNext(in: list.threads) },
-                                 onPullPrevious: { model.selectPrevious(in: list.threads) })
-                    .background(CWT.paper)
-                    .transition(.reader)
-            }
-        }
-        .clipped()
-    }
-
-    /// What pulling past the bottom (+1) or top (-1) of the reader moves to.
-    private func neighbor(of thread: MailThread, offset: Int) -> MailThread? {
-        let threads = list.threads
-        guard let idx = threads.firstIndex(where: { $0.key == thread.key }),
-              threads.indices.contains(idx + offset) else { return nil }
-        return threads[idx + offset]
-    }
-}
-
-/// The rule between list and reader, dragged to resize the list.
-private struct ListResizer: View {
-    @Binding var width: Double
-    /// Width when the drag began — translation is from the drag's start, so
-    /// accumulating per-change would compound into a runaway column.
-    @State private var startWidth: Double?
-    @State private var hovering = false
-
-    private var active: Bool { hovering || startWidth != nil }
-
-    var body: some View {
-        Rectangle()
-            .fill(active ? CWT.ink : CWT.hairline)
-            .frame(width: active ? 2 : 1)
-            .frame(width: 9)
-            .contentShape(Rectangle())
-            .onHover { inside in
-                hovering = inside
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
-            .onTapGesture(count: 2) {
-                withAnimation(.easeInOut(duration: 0.15)) { width = 340 }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { value in
-                        let start = startWidth ?? width
-                        if startWidth == nil { startWidth = start }
-                        width = min(600, max(240, start + value.translation.width))
-                    }
-                    .onEnded { _ in startWidth = nil }
-            )
-            .help("Drag to resize the list — double-click to reset")
-    }
-}
-#endif

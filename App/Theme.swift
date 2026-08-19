@@ -306,20 +306,6 @@ struct EmptyState: View {
 // MARK: - Navigation transitions
 
 extension AnyTransition {
-    /// The board sits nearest the camera: it leaves by growing past the eye
-    /// and comes back the same way, so drilling into a mailbox reads as
-    /// zooming through the overview rather than swapping screens.
-    static let boardLayer = AnyTransition.scale(scale: 1.05).combined(with: .opacity)
-    /// A mailbox rises from just behind the board on the way in and sinks
-    /// back on the way out — the counterpart to `boardLayer`.
-    static let mailboxRise = AnyTransition.scale(scale: 0.96).combined(with: .opacity)
-    /// Mailbox to mailbox: the new one pushes in from the side it sits on in
-    /// the rail while the old one gives way toward the other edge.
-    static func mailboxPush(forward: Bool) -> AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
-            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity))
-    }
     /// The reader arrives over its placeholder from the right, and leaves the
     /// way it came.
     static let reader = AnyTransition.move(edge: .trailing).combined(with: .opacity)

@@ -47,9 +47,9 @@ final class AppModel: ObservableObject {
     let syncEngine: SyncEngine
     let outbox: OutboxManager
     let notifier = MailNotifier()
-    /// The rail's saved arrangement. Owned here (not by a view) so navigation
-    /// can tell which way one mailbox sits relative to another and slide the
-    /// canvas accordingly.
+    /// The rail's saved arrangement — which is also the board's column order
+    /// and their widths. Owned here so model-level navigation and the canvas
+    /// read one source.
     let order = SidebarOrder()
 
     @Published var lastError: String?
@@ -67,16 +67,10 @@ final class AppModel: ObservableObject {
     /// not @Published: no view renders from it, and hover churns too fast to
     /// be worth an objectWillChange per row crossing.
     var hoveredThread: MailThread?
-    /// The list model behind the full-width mailbox currently on screen, so
-    /// keyboard triage and the palette act on the rows that are visible. Weak:
-    /// the pane that created it owns it, and it dies with the pane.
+    /// The list model behind the focused column, so keyboard triage and the
+    /// palette act on the rows beside the reader. Weak: the column that
+    /// created it owns it.
     weak var activeList: ThreadListModel?
-    /// How the canvas moves on the next navigation: a zoom between the board
-    /// and a mailbox, a directional push between two mailboxes. Set just
-    /// before `mailbox` changes so both sides of the swap share one
-    /// choreography. Not @Published — it's read during the render the mailbox
-    /// change triggers, never a reason to render by itself.
-    var mailboxTransition: AnyTransition = .mailboxRise
     /// Which way the reader's last thread swap went (true = toward the next,
     /// lower row), so the incoming thread slides in from the side you moved.
     var readerSlideForward = true
@@ -1093,36 +1087,22 @@ final class AppModel: ObservableObject {
 
     // MARK: - Navigation
 
-    /// Every mailbox change funnels through here so it animates: a zoom
-    /// between the board and a mailbox, a directional slide between two
-    /// mailboxes. `thread`, when given, arrives already selected (a drill-in
-    /// from the board, or a widget tap).
+    /// Every mailbox change funnels through here so it animates. The canvas
+    /// derives all its choreography from `mailbox` — which columns shove
+    /// where — so one animated assignment is the whole trick. `thread`, when
+    /// given, arrives already selected (a drill-in from a column row, or a
+    /// widget tap).
     func navigate(to box: MailboxFilter?, selecting thread: MailThread? = nil) {
         guard box != mailbox else {
             if let thread { select(thread) }
             return
         }
-        if let from = mailbox.flatMap(rank(of:)), let to = box.flatMap(rank(of:)) {
-            mailboxTransition = .mailboxPush(forward: to > from)
-        } else {
-            mailboxTransition = .mailboxRise
-        }
         readerSlideForward = true
+        if box == nil { activeList = nil }
         withAnimation(CWT.nav) {
             mailbox = box
             selectedThread = thread
         }
-    }
-
-    /// Where a mailbox sits in the rail, accounts after the built-ins — the
-    /// slide between two mailboxes runs the way you'd read the rail.
-    private func rank(of box: MailboxFilter) -> Int? {
-        if case .account(let id) = box {
-            return order.sorted(accountStore.accounts)
-                .firstIndex { $0.id == id }
-                .map { order.items.count + $0 }
-        }
-        return order.items.firstIndex { $0.filter == box }
     }
 
     /// Animated selection change: the reader slides the way you moved,

@@ -179,19 +179,25 @@ final class SidebarOrder: ObservableObject {
 
     /// Only the columns the user has actually resized are stored, so a
     /// mailbox that has never been touched follows the default if it changes.
-    func width(_ item: SidebarItem) -> CGFloat {
-        widths[item.rawValue].map { CGFloat($0) } ?? Self.defaultColumnWidth
+    /// Keyed by string rather than `SidebarItem` so the account columns the
+    /// canvas conjures while an account mailbox is focused get widths too.
+    func width(key: String) -> CGFloat {
+        widths[key].map { CGFloat($0) } ?? Self.defaultColumnWidth
     }
 
-    func setWidth(_ width: CGFloat, for item: SidebarItem) {
-        widths[item.rawValue] = Double(min(max(width, Self.minColumnWidth), Self.maxColumnWidth))
+    func setWidth(_ width: CGFloat, key: String) {
+        widths[key] = Double(min(max(width, Self.minColumnWidth), Self.maxColumnWidth))
         defaults.set(widths, forKey: widthsKey)
     }
 
-    func resetWidth(_ item: SidebarItem) {
-        widths[item.rawValue] = nil
+    func resetWidth(key: String) {
+        widths[key] = nil
         defaults.set(widths, forKey: widthsKey)
     }
+
+    func width(_ item: SidebarItem) -> CGFloat { width(key: item.rawValue) }
+    func setWidth(_ width: CGFloat, for item: SidebarItem) { setWidth(width, key: item.rawValue) }
+    func resetWidth(_ item: SidebarItem) { resetWidth(key: item.rawValue) }
 }
 
 // MARK: - Expanded state
