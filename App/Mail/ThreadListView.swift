@@ -40,6 +40,7 @@ struct ThreadListView: View {
             }
         }
         .listStyle(.plain)
+        .animation(.easeInOut(duration: 0.28), value: listModel.threads.map(\.key))
         .scrollContentBackground(.hidden)
         .background(CWT.paper)
         .onKeyPress(phases: .down) { press in

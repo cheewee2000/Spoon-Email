@@ -232,6 +232,7 @@ private struct ThreadPageList: View {
             }
         }
         .listStyle(.plain)
+        .animation(.easeInOut(duration: 0.28), value: list.threads.map(\.key))
         .scrollContentBackground(.hidden)
         .background(CWT.paper)
         .refreshable { await model.syncAndWait() }

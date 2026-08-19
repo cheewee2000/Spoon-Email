@@ -185,6 +185,7 @@ private struct BoardColumn: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.28), value: list.threads.map(\.key))
         // Same trick the full-width list uses: row .onAppear can't be trusted
         // to fire, so page from the scroll position instead.
         .onScrollGeometryChange(for: Bool.self) { geo in
