@@ -39,6 +39,11 @@ public actor SyncEngine {
     public var newMailHandler: (@Sendable ([NewMail]) -> Void)?
     public func setNewMailHandler(_ h: @Sendable @escaping ([NewMail]) -> Void) { newMailHandler = h }
 
+    /// Fires with the account id when a pass dies on a dead token — the UI
+    /// flags the account for reconnecting instead of failing silently forever.
+    public var authFailureHandler: (@Sendable (String) -> Void)?
+    public func setAuthFailureHandler(_ h: @Sendable @escaping (String) -> Void) { authFailureHandler = h }
+
     public init(db: AppDatabase, tokens: TokenManager) {
         self.db = db
         self.tokens = tokens
@@ -78,7 +83,12 @@ public actor SyncEngine {
                 }
                 await refreshDraftThreadsOnce(accountId: acct.id)
             } catch {
-                statusHandler?("Sync failed: \(account.email)")
+                if let e = error as? MailError, e.isAuthFailure {
+                    authFailureHandler?(account.id)
+                    statusHandler?("Reconnect \(account.email) — Google signed it out")
+                } else {
+                    statusHandler?("Sync failed: \(account.email)")
+                }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }

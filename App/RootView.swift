@@ -457,7 +457,8 @@ struct RootView: View {
                                 showClientSetup: { model.showClientSetup = true },
                                 defaultComposeId: model.defaultComposeAccount?.id,
                                 setDefaultCompose: model.setDefaultComposeAccount,
-                                setColor: model.setAccountColor)
+                                setColor: model.setAccountColor,
+                                reconnect: model.reconnect)
             }
             Hairline()
             footer
@@ -559,6 +560,7 @@ struct AccountsSection: View {
     let defaultComposeId: String?
     let setDefaultCompose: (String) -> Void
     let setColor: (Account, String?) -> Void
+    let reconnect: (Account) -> Void
     @Environment(\.railExpanded) private var expanded
 
     var body: some View {
@@ -568,12 +570,25 @@ struct AccountsSection: View {
                 // Same color the account's rows wear in the thread list — with
                 // the address gone, color and the filled/hollow ring are what
                 // tell two accounts apart until you hover one.
+                let broken = store.needsReauth.contains(account.id)
                 RailIcon(account.email,
                          systemImage: account.includeInUnified ? "person.circle.fill" : "person.circle",
                          tint: accountColor(account.id),
-                         trailingSymbol: account.id == defaultComposeId ? "square.and.pencil" : nil)
+                         // A dead token outranks the compose pencil: the
+                         // account can't send or sync until it's reconnected.
+                         trailingSymbol: broken ? "exclamationmark.triangle.fill"
+                                       : account.id == defaultComposeId ? "square.and.pencil" : nil,
+                         trailingTint: broken ? .orange : nil)
                 .tag(MailboxFilter.account(account.id))
                 .contextMenu {
+                    if broken {
+                        Button {
+                            reconnect(account)
+                        } label: {
+                            Label("Reconnect Account…", systemImage: "exclamationmark.triangle.fill")
+                        }
+                        Divider()
+                    }
                     Toggle("Include in Unified Inbox", isOn: Binding(
                         get: { account.includeInUnified },
                         set: { _ in Task { await store.toggleUnified(account) } }
@@ -612,6 +627,9 @@ struct AccountsSection: View {
                         }
                     }
                     Divider()
+                    if !broken {
+                        Button("Reconnect Account…") { reconnect(account) }
+                    }
                     Button("Remove Account", role: .destructive) {
                         Task { await store.removeAccount(account) }
                     }

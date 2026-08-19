@@ -4,6 +4,11 @@ import GRDB
 @MainActor
 public final class AccountStore: ObservableObject {
     @Published public private(set) var accounts: [Account] = []
+    /// Accounts whose refresh token Google has rejected; cleared by a
+    /// successful re-sign-in through `addAccount`.
+    @Published public private(set) var needsReauth: Set<String> = []
+
+    public func markNeedsReauth(_ accountId: String) { needsReauth.insert(accountId) }
 
     private let db: AppDatabase
     public let tokens: TokenManager
@@ -24,8 +29,8 @@ public final class AccountStore: ObservableObject {
 
     /// Runs the full interactive add-account flow.
     @discardableResult
-    public func addAccount() async throws -> Account {
-        let oauthTokens = try await GoogleOAuth.signIn(config: config)
+    public func addAccount(loginHint: String? = nil) async throws -> Account {
+        let oauthTokens = try await GoogleOAuth.signIn(config: config, loginHint: loginHint)
         let accountId = UUID().uuidString
         try await tokens.store(oauthTokens, accountId: accountId)
 
@@ -36,6 +41,7 @@ public final class AccountStore: ObservableObject {
         if let existing = accounts.first(where: { $0.email == profile.emailAddress }) {
             await tokens.remove(accountId: accountId)
             try await tokens.store(oauthTokens, accountId: existing.id)
+            needsReauth.remove(existing.id)
             return existing
         }
 
@@ -65,6 +71,7 @@ public final class AccountStore: ObservableObject {
     }
 
     public func removeAccount(_ account: Account) async {
+        needsReauth.remove(account.id)
         await tokens.remove(accountId: account.id)
         _ = try? await db.writer.write { db in
             try Account.deleteOne(db, key: account.id)

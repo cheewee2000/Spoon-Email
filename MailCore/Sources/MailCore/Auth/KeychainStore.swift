@@ -62,6 +62,20 @@ public enum MailError: Error, LocalizedError {
     case notConfigured
     case http(Int, String)
     case noRefreshToken
+    /// Google's token endpoint refused the refresh token (invalid_grant —
+    /// revoked, password changed, or expired under a Testing-mode client).
+    /// Only a fresh interactive sign-in clears it.
+    case authRevoked(String)
+
+    /// True when the account can't be used again without the user signing
+    /// in — as opposed to a transient network/server error.
+    public var isAuthFailure: Bool {
+        switch self {
+        case .authRevoked, .noRefreshToken: return true
+        case .http(401, _): return true
+        default: return false
+        }
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -69,6 +83,7 @@ public enum MailError: Error, LocalizedError {
         case .oauthFailed(let m): return "Sign-in failed: \(m)"
         case .notConfigured: return "Add your Google OAuth client ID first — click Add Account and follow the setup steps."
         case .http(let code, let body): return "Gmail API error \(code): \(body)"
+        case .authRevoked(let m): return "Google signed this account out (\(m)) — reconnect it to keep syncing."
         case .noRefreshToken: return "Account needs to be re-added (no refresh token)."
         }
     }

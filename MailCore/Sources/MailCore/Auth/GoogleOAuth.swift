@@ -55,7 +55,7 @@ public enum GoogleOAuth {
     static let tokenEndpoint = "https://oauth2.googleapis.com/token"
 
     @MainActor
-    public static func signIn(config: GoogleOAuthConfig) async throws -> OAuthTokens {
+    public static func signIn(config: GoogleOAuthConfig, loginHint: String? = nil) async throws -> OAuthTokens {
         guard config.isConfigured else { throw MailError.notConfigured }
         let verifier = randomURLSafe(48)
         let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
@@ -73,6 +73,8 @@ public enum GoogleOAuth {
             // Always show the account chooser so a second account can be added
             .init(name: "prompt", value: "select_account"),
         ]
+        // Reconnecting: preselect the address that needs it.
+        if let loginHint { comps.queryItems?.append(.init(name: "login_hint", value: loginHint)) }
 
         let callbackURL = try await runSession(url: comps.url!, scheme: config.redirectScheme)
         let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -95,11 +97,19 @@ public enum GoogleOAuth {
 
     public static func refresh(tokens: OAuthTokens, config: GoogleOAuthConfig) async throws -> OAuthTokens {
         guard !tokens.refreshToken.isEmpty else { throw MailError.noRefreshToken }
-        return try await exchange(form: [
-            "client_id": config.clientID,
-            "refresh_token": tokens.refreshToken,
-            "grant_type": "refresh_token",
-        ], existingRefreshToken: tokens.refreshToken)
+        do {
+            return try await exchange(form: [
+                "client_id": config.clientID,
+                "refresh_token": tokens.refreshToken,
+                "grant_type": "refresh_token",
+            ], existingRefreshToken: tokens.refreshToken)
+        } catch MailError.http(let code, let body) where (400...499).contains(code) {
+            // A 4xx from the token endpoint means the grant itself is dead —
+            // retrying every sync pass will never fix it.
+            let reason = body.range(of: #""error"\s*:\s*"([^"]+)""#, options: .regularExpression)
+                .map { String(body[$0]).components(separatedBy: "\"").dropLast().last ?? body } ?? "HTTP \(code)"
+            throw MailError.authRevoked(reason)
+        }
     }
 
     // MARK: - Internals

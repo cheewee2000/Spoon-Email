@@ -301,15 +301,17 @@ struct RailIcon: View {
     /// Small marker trailing the row — the pencil that flags the account new
     /// mail is composed from.
     var trailingSymbol: String?
+    var trailingTint: Color?
     @Environment(\.railExpanded) private var expanded
 
     init(_ title: String, systemImage: String, tint: Color? = nil, badge: Int = 0,
-         trailingSymbol: String? = nil) {
+         trailingSymbol: String? = nil, trailingTint: Color? = nil) {
         self.title = title
         self.systemImage = systemImage
         self.tint = tint
         self.badge = badge
         self.trailingSymbol = trailingSymbol
+        self.trailingTint = trailingTint
     }
 
     var body: some View {
@@ -356,7 +358,7 @@ struct RailIcon: View {
     private func marker(_ symbol: String) -> some View {
         Image(systemName: symbol)
             .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(CWT.ink3)
+            .foregroundStyle(trailingTint ?? CWT.ink3)
     }
 
     private var badgeLabel: some View {

@@ -106,6 +106,9 @@ final class AppModel: ObservableObject {
             await syncEngine.setStatusHandler { [weak self] status in
                 Task { @MainActor in self?.syncStatus = status }
             }
+            await syncEngine.setAuthFailureHandler { [weak self] accountId in
+                Task { @MainActor in self?.accountStore.markNeedsReauth(accountId) }
+            }
             await syncEngine.setNewMailHandler { [weak self] items in
                 Task { @MainActor in self?.notifier.post(items) }
             }
@@ -181,7 +184,13 @@ final class AppModel: ObservableObject {
 
     // MARK: - Accounts
 
-    func addAccount() {
+    func addAccount() { addAccount(reconnecting: nil) }
+
+    /// Re-runs sign-in for an account whose token Google rejected; the store
+    /// swaps the tokens in place, so nothing is re-downloaded.
+    func reconnect(_ account: Account) { addAccount(reconnecting: account.email) }
+
+    private func addAccount(reconnecting email: String?) {
         // No client ID yet — collect it first; the setup sheet calls back
         // into this method once one is saved.
         guard Config.isConfigured else {
@@ -190,7 +199,7 @@ final class AppModel: ObservableObject {
         }
         Task {
             do {
-                try await accountStore.addAccount()
+                try await accountStore.addAccount(loginHint: email)
                 await pushAccountEmails()
                 syncNow()
             } catch {
