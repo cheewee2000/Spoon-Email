@@ -47,6 +47,10 @@ final class AppModel: ObservableObject {
     let syncEngine: SyncEngine
     let outbox: OutboxManager
     let notifier = MailNotifier()
+    /// The rail's saved arrangement. Owned here (not by a view) so navigation
+    /// can tell which way one mailbox sits relative to another and slide the
+    /// canvas accordingly.
+    let order = SidebarOrder()
 
     @Published var lastError: String?
     @Published var syncStatus: String?
@@ -63,9 +67,19 @@ final class AppModel: ObservableObject {
     /// not @Published: no view renders from it, and hover churns too fast to
     /// be worth an objectWillChange per row crossing.
     var hoveredThread: MailThread?
-    /// Survives the mailbox switch that a drill-in performs, so the thread you
-    /// clicked on the board is still selected once its column opens full-width.
-    var pendingSelection: MailThread?
+    /// The list model behind the full-width mailbox currently on screen, so
+    /// keyboard triage and the palette act on the rows that are visible. Weak:
+    /// the pane that created it owns it, and it dies with the pane.
+    weak var activeList: ThreadListModel?
+    /// How the canvas moves on the next navigation: a zoom between the board
+    /// and a mailbox, a directional push between two mailboxes. Set just
+    /// before `mailbox` changes so both sides of the swap share one
+    /// choreography. Not @Published — it's read during the render the mailbox
+    /// change triggers, never a reason to render by itself.
+    var mailboxTransition: AnyTransition = .mailboxRise
+    /// Which way the reader's last thread swap went (true = toward the next,
+    /// lower row), so the incoming thread slides in from the side you moved.
+    var readerSlideForward = true
     /// Account new messages are composed from. Replies ignore it — they always
     /// answer from the address the mail arrived at. `nil` means "no preference",
     /// which falls back to the first account.
@@ -234,7 +248,7 @@ final class AppModel: ObservableObject {
     /// The board has no search field of its own, so ⌘F there opens Unified —
     /// the search is across all mail anyway — and focuses that.
     func focusSearch() {
-        if mailbox == nil { mailbox = .unified }
+        if mailbox == nil { navigate(to: .unified) }
         focusSearchRequest += 1
     }
 
@@ -544,22 +558,29 @@ final class AppModel: ObservableObject {
 
     func selectNext(in threads: [MailThread]) {
         guard !threads.isEmpty else { return }
+        readerSlideForward = true
         guard let sel = selectedThread,
               let idx = threads.firstIndex(where: { $0.key == sel.key }) else {
-            selectedThread = threads.first
+            withAnimation(CWT.nav) { selectedThread = threads.first }
             return
         }
-        if idx + 1 < threads.count { selectedThread = threads[idx + 1] }
+        if idx + 1 < threads.count {
+            withAnimation(CWT.nav) { selectedThread = threads[idx + 1] }
+        }
     }
 
     func selectPrevious(in threads: [MailThread]) {
         guard !threads.isEmpty else { return }
         guard let sel = selectedThread,
               let idx = threads.firstIndex(where: { $0.key == sel.key }) else {
-            selectedThread = threads.first
+            readerSlideForward = true
+            withAnimation(CWT.nav) { selectedThread = threads.first }
             return
         }
-        if idx > 0 { selectedThread = threads[idx - 1] }
+        if idx > 0 {
+            readerSlideForward = false
+            withAnimation(CWT.nav) { selectedThread = threads[idx - 1] }
+        }
     }
 
     /// Archive the selection and advance to the next thread (Superhuman "e").
@@ -569,11 +590,13 @@ final class AppModel: ObservableObject {
         archive(sel)
         if let idx {
             if idx + 1 < threads.count {
-                selectedThread = threads[idx + 1]
+                readerSlideForward = true
+                withAnimation(CWT.nav) { selectedThread = threads[idx + 1] }
             } else if idx > 0 {
-                selectedThread = threads[idx - 1]
+                readerSlideForward = false
+                withAnimation(CWT.nav) { selectedThread = threads[idx - 1] }
             } else {
-                selectedThread = nil
+                withAnimation(CWT.nav) { selectedThread = nil }
             }
         }
     }
@@ -1070,22 +1093,66 @@ final class AppModel: ObservableObject {
 
     // MARK: - Navigation
 
+    /// Every mailbox change funnels through here so it animates: a zoom
+    /// between the board and a mailbox, a directional slide between two
+    /// mailboxes. `thread`, when given, arrives already selected (a drill-in
+    /// from the board, or a widget tap).
+    func navigate(to box: MailboxFilter?, selecting thread: MailThread? = nil) {
+        guard box != mailbox else {
+            if let thread { select(thread) }
+            return
+        }
+        if let from = mailbox.flatMap(rank(of:)), let to = box.flatMap(rank(of:)) {
+            mailboxTransition = .mailboxPush(forward: to > from)
+        } else {
+            mailboxTransition = .mailboxRise
+        }
+        readerSlideForward = true
+        withAnimation(CWT.nav) {
+            mailbox = box
+            selectedThread = thread
+        }
+    }
+
+    /// Where a mailbox sits in the rail, accounts after the built-ins — the
+    /// slide between two mailboxes runs the way you'd read the rail.
+    private func rank(of box: MailboxFilter) -> Int? {
+        if case .account(let id) = box {
+            return order.sorted(accountStore.accounts)
+                .firstIndex { $0.id == id }
+                .map { order.items.count + $0 }
+        }
+        return order.items.firstIndex { $0.filter == box }
+    }
+
+    /// Animated selection change: the reader slides the way you moved,
+    /// judged from where the two threads sit in the visible list.
+    func select(_ thread: MailThread?) {
+        let threads = activeList?.threads ?? []
+        if let sel = selectedThread, let new = thread,
+           let a = threads.firstIndex(where: { $0.key == sel.key }),
+           let b = threads.firstIndex(where: { $0.key == new.key }) {
+            readerSlideForward = b >= a
+        } else {
+            readerSlideForward = true
+        }
+        withAnimation(CWT.nav) { selectedThread = thread }
+    }
+
     /// Open one thread full-width in a given mailbox. From the board this is a
     /// drill-in: the column you clicked becomes the window, and Escape brings
     /// the board back.
     func open(_ thread: MailThread, in filter: MailboxFilter) {
-        pendingSelection = thread
-        mailbox = filter
-        selectedThread = thread
+        navigate(to: filter, selecting: thread)
     }
 
     /// Back out to the board. Deepest level first: a thread selection goes
     /// before the mailbox does, so Escape retraces the way you came in.
     func escape() {
         if selectedThread != nil {
-            selectedThread = nil
+            withAnimation(CWT.nav) { selectedThread = nil }
         } else if mailbox != nil {
-            mailbox = nil
+            navigate(to: nil)
         }
     }
 

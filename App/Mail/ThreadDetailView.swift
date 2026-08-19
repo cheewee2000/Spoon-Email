@@ -16,9 +16,10 @@ struct ThreadDetailView: View {
     @StateObject private var detail = ThreadDetailModel()
     /// Signed: positive = pulling past the bottom, negative = past the top.
     @State private var pullProgress: CGFloat = 0
-    /// Which way the last swap went, so the new thread slides in from the
-    /// side you pulled toward.
-    @State private var slideForward = true
+    /// Which way the swap slides lives on the model (`readerSlideForward`)
+    /// now, so clicks in the list and j/k — which change the selection from
+    /// outside this view — pick their direction too, not just the pulls.
+    private var slideForward: Bool { model.readerSlideForward }
 
     private func archive() {
         if let onArchive { onArchive() } else { model.archive(thread) }
@@ -169,15 +170,13 @@ struct ThreadDetailView: View {
                 onPull: { progress in
                     if pullProgress != progress { pullProgress = progress }
                 },
-                // Only a pull slides; a click in the list or j/k still swaps
-                // instantly, because only these go through withAnimation.
                 onPullNext: onPullNext.map { go in {
-                    slideForward = true
-                    withAnimation(.easeInOut(duration: 0.3)) { go() }
+                    model.readerSlideForward = true
+                    withAnimation(CWT.nav) { go() }
                 } },
                 onPullPrevious: onPullPrevious.map { go in {
-                    slideForward = false
-                    withAnimation(.easeInOut(duration: 0.3)) { go() }
+                    model.readerSlideForward = false
+                    withAnimation(CWT.nav) { go() }
                 } }
             )
             .overlay(alignment: .bottom) { pullHint(forward: true) }

@@ -79,6 +79,11 @@ enum CWT {
     /// Standard mechanical ease. Never bouncy.
     static let ease = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)
 
+    /// The navigation clock: board↔mailbox zooms, mailbox↔mailbox slides,
+    /// and the reader all move on this one spring, so every trip through the
+    /// app has the same weight.
+    static let nav = Animation.spring(response: 0.32, dampingFraction: 0.86)
+
     // MARK: Registration
 
     private(set) static var fontsRegistered = false
@@ -296,4 +301,26 @@ struct EmptyState: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
+
+// MARK: - Navigation transitions
+
+extension AnyTransition {
+    /// The board sits nearest the camera: it leaves by growing past the eye
+    /// and comes back the same way, so drilling into a mailbox reads as
+    /// zooming through the overview rather than swapping screens.
+    static let boardLayer = AnyTransition.scale(scale: 1.05).combined(with: .opacity)
+    /// A mailbox rises from just behind the board on the way in and sinks
+    /// back on the way out — the counterpart to `boardLayer`.
+    static let mailboxRise = AnyTransition.scale(scale: 0.96).combined(with: .opacity)
+    /// Mailbox to mailbox: the new one pushes in from the side it sits on in
+    /// the rail while the old one gives way toward the other edge.
+    static func mailboxPush(forward: Bool) -> AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity))
+    }
+    /// The reader arrives over its placeholder from the right, and leaves the
+    /// way it came.
+    static let reader = AnyTransition.move(edge: .trailing).combined(with: .opacity)
 }

@@ -146,7 +146,7 @@ private struct BoardColumn: View {
         .contentShape(Rectangle())
         // The header is the column's own title bar: click it to open this
         // mailbox full-width, drag it to move the column.
-        .onTapGesture { model.mailbox = item.filter }
+        .onTapGesture { model.navigate(to: item.filter) }
         .help("Open \(item.title) — drag to reorder")
         .draggable(item.rawValue) {
             Label(item.title, systemImage: item.systemImage)

@@ -5,12 +5,12 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
 
-    @StateObject private var listModel = ThreadListModel()
-    @StateObject private var order = SidebarOrder()
+    /// Lives on the model now (navigation reads it to pick slide directions);
+    /// observed here so rail reorders still re-render the sidebar and board.
+    @ObservedObject private var order = AppModel.shared.order
     @AppStorage("sidebarExpanded") private var sidebarExpanded = false
-    /// Native split-view collapse (toolbar chevron / drag-to-hide). Tracked
-    /// here because the board <-> mailbox swap builds a fresh split view each
-    /// time, which would otherwise reset the sidebar to visible.
+    /// Native split-view collapse (toolbar chevron / drag-to-hide),
+    /// remembered across launches.
     @AppStorage("sidebarHidden") private var sidebarHidden = false
     @State private var columns = NavigationSplitViewVisibility.automatic
     @State private var searchText = ""
@@ -22,14 +22,13 @@ struct RootView: View {
     var body: some View {
         Group {
             #if os(macOS)
-            if model.mailbox == nil {
-                NavigationSplitView(columnVisibility: $columns) {
-                    sidebar
-                } detail: {
-                    BoardView(order: order)
-                }
-            } else {
-                mailboxWindow
+            // One split view for every mode, so board↔mailbox is a view swap
+            // inside a stable detail column — which is what lets it animate —
+            // rather than a rebuild of the whole window chrome.
+            NavigationSplitView(columnVisibility: $columns) {
+                sidebar
+            } detail: {
+                mailCanvas
             }
             #else
             // No board on the phone — nine columns don't fit. One mailbox at a
@@ -58,29 +57,13 @@ struct RootView: View {
         // would restart a query on every swipe.
         #if os(macOS)
         .onChange(of: model.mailbox) {
+            // Each mailbox pane starts its own search from scratch; the pane
+            // itself (keyed by mailbox) handles observing its list.
             searchText = ""
-            // The swap just built a fresh split view — re-impose the collapse.
-            columns = desiredColumns
-            // Board: nothing to observe, and nothing to clear either — the
-            // full-width list keeps its last mailbox for when we come back.
-            guard let mailbox = model.mailbox else { return }
-            listModel.observe(db: model.db, filter: mailbox)
-            // Normally a mailbox switch starts you with nothing selected; a
-            // drill-in from the board hands over the thread you clicked.
-            model.selectedThread = model.pendingSelection
-            model.pendingSelection = nil
-        }
-        .onChange(of: searchText) {
-            guard let mailbox = model.mailbox else { return }
-            if searchText.isEmpty {
-                listModel.observe(db: model.db, filter: mailbox)
-            } else {
-                listModel.observeSearch(db: model.db, query: searchText)
-            }
         }
         .onChange(of: columns) {
             // The user dragged or toggled the sidebar — remember their choice.
-            sidebarHidden = (columns == .detailOnly || columns == .doubleColumn)
+            sidebarHidden = (columns == .detailOnly)
         }
         .onChange(of: model.focusSearchRequest) {
             // ⌘F on the board opens Unified, and that search field doesn't
@@ -156,9 +139,9 @@ struct RootView: View {
             let parts = url.pathComponents.filter { $0 != "/" }
             switch url.host {
             case "mailbox":
-                model.mailbox = .unified
+                model.navigate(to: .unified)
             case "thread" where parts.count == 2:
-                model.mailbox = .unified
+                model.navigate(to: .unified)
                 model.openThread(accountId: parts[0], threadId: parts[1])
             default:
                 break
@@ -197,59 +180,34 @@ struct RootView: View {
         }
     }
 
-    /// What the current layout should show when the sidebar is hidden: the
-    /// board is two columns (sidebar + detail), a mailbox is three.
+    #if os(macOS)
     private var desiredColumns: NavigationSplitViewVisibility {
-        sidebarHidden ? (model.mailbox == nil ? .detailOnly : .doubleColumn) : .all
+        sidebarHidden ? .detailOnly : .all
     }
 
-    /// One mailbox, full width: the list beside the conversation.
-    private var mailboxWindow: some View {
-        NavigationSplitView(columnVisibility: $columns) {
-            sidebar
-        } content: {
-            ThreadListView(listModel: listModel, selection: $model.selectedThread,
-                           searchQuery: searchText.isEmpty ? nil : searchText)
-                .searchable(text: $searchText, prompt: "Search all mail")
-                .searchFocused($searchFocused)
-                .navigationTitle(listModel.filter.title)
-                .toolbar {
-                    ToolbarItem {
-                        Button {
-                            model.compose()
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                        }
-                        .help("Compose (C)")
-                    }
-                }
-                #if os(macOS)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 340)
-                #endif
-        } detail: {
-            if let thread = model.selectedThread {
-                ThreadDetailView(thread: thread,
-                                 nextThread: neighbor(of: thread, offset: 1),
-                                 previousThread: neighbor(of: thread, offset: -1),
-                                 onPullNext: { model.selectNext(in: listModel.threads) },
-                                 onPullPrevious: { model.selectPrevious(in: listModel.threads) })
+    /// The animated stage right of the rail: the board, or one mailbox (list
+    /// beside reader). Between two mailboxes the panes push sideways in rail
+    /// order; between board and mailbox they zoom — the board grows past the
+    /// eye while the mailbox rises from just behind it, so the board reads as
+    /// the layer nearest the camera (hence its zIndex during the crossover).
+    private var mailCanvas: some View {
+        ZStack {
+            if let box = model.mailbox {
+                MailboxPane(box: box,
+                            searchText: $searchText,
+                            searchFocused: $searchFocused)
+                    .id(box)
+                    .transition(model.mailboxTransition)
             } else {
-                Text("Select a conversation")
-                    .font(CWT.caption)
-                    .foregroundStyle(CWT.ink3)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(CWT.paper)
+                BoardView(order: order)
+                    .transition(.boardLayer)
+                    .zIndex(1)
             }
         }
+        .clipped()
+        .background(CWT.paper)
     }
-
-    /// What pulling past the bottom (+1) or top (-1) of the reader moves to.
-    private func neighbor(of thread: MailThread, offset: Int) -> MailThread? {
-        let threads = listModel.threads
-        guard let idx = threads.firstIndex(where: { $0.key == thread.key }),
-              threads.indices.contains(idx + offset) else { return nil }
-        return threads[idx + offset]
-    }
+    #endif
 
     /// Single-key triage shortcuts, active no matter what has focus (thread
     /// list, message web view) — but never while typing: text fields, the
@@ -290,7 +248,7 @@ struct RootView: View {
         // board, whose columns have no selection of their own.
         let hovered = model.hoveredThread
         guard model.mailbox != nil || hovered != nil else { return false }
-        let threads = listModel.threads
+        let threads = model.activeList?.threads ?? []
         let target = hovered ?? model.selectedThread
         switch event.charactersIgnoringModifiers {
         case "j": guard model.mailbox != nil else { return false }
@@ -328,7 +286,7 @@ struct RootView: View {
         var actions: [PaletteAction] = []
         if let t = model.selectedThread {
             actions.append(PaletteAction("Archive", systemImage: "archivebox", shortcut: "E") {
-                model.archiveSelected(in: listModel.threads)
+                model.archiveSelected(in: model.activeList?.threads ?? [])
             })
             actions.append(PaletteAction("Reply", systemImage: "arrowshape.turn.up.left", shortcut: "R") {
                 model.reply(to: t, all: false)
@@ -377,8 +335,7 @@ struct RootView: View {
         })
         actions.append(PaletteAction("Go to All Mailboxes", systemImage: "rectangle.split.3x1",
                                      shortcut: "esc") {
-            model.selectedThread = nil
-            model.mailbox = nil
+            model.navigate(to: nil)
         })
         let boxes: [(String, MailboxFilter, String)] = [
             ("Go to Unified Inbox", .unified, "tray.full"),
@@ -394,11 +351,11 @@ struct RootView: View {
             ("Go to Spam", .spam, "xmark.bin"),
         ]
         for (title, box, icon) in boxes {
-            actions.append(PaletteAction(title, systemImage: icon) { model.mailbox = box })
+            actions.append(PaletteAction(title, systemImage: icon) { model.navigate(to: box) })
         }
         for account in model.accountStore.accounts {
             actions.append(PaletteAction("Go to \(account.email)", systemImage: "person.circle") {
-                model.mailbox = .account(account.id)
+                model.navigate(to: .account(account.id))
             })
         }
         return actions
@@ -414,14 +371,14 @@ struct RootView: View {
     /// only be a wall for a reorder to bump into.
     private var sidebar: some View {
         VStack(spacing: 0) {
-            List(selection: $model.mailbox) {
+            List(selection: Binding(get: { model.mailbox },
+                                    set: { model.navigate(to: $0) })) {
                 Section {
                     // The way home, for anyone who doesn't reach for Escape.
                     // Untagged, so the list can't select it — the board's
                     // "selection" is the absence of a mailbox.
                     Button {
-                        model.selectedThread = nil
-                        model.mailbox = nil
+                        model.navigate(to: nil)
                     } label: {
                         RailIcon("All Mailboxes", systemImage: "rectangle.split.3x1")
                     }
@@ -662,3 +619,125 @@ struct AccountsSection: View {
         }
     }
 }
+
+#if os(macOS)
+/// One mailbox filling the canvas: the thread list beside the reader. Owns
+/// its own list model and is keyed by the mailbox, so during a
+/// mailbox-to-mailbox slide the outgoing pane keeps showing the mail it was
+/// showing instead of flashing the incoming mailbox's rows.
+private struct MailboxPane: View {
+    @EnvironmentObject var model: AppModel
+    let box: MailboxFilter
+    @Binding var searchText: String
+    var searchFocused: FocusState<Bool>.Binding
+    @StateObject private var list = ThreadListModel()
+    /// The list column's width, persisted. The native split-view column went
+    /// away with the custom canvas, so the rule between list and reader
+    /// drags to resize — same gesture as the board's column resizers.
+    @AppStorage("mailboxListWidth") private var listWidth = 340.0
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ThreadListView(listModel: list,
+                           selection: Binding(
+                               get: { model.selectedThread },
+                               set: { model.select($0) }),
+                           searchQuery: searchText.isEmpty ? nil : searchText)
+                .searchable(text: $searchText, prompt: "Search all mail")
+                .searchFocused(searchFocused)
+                .frame(width: listWidth)
+            ListResizer(width: $listWidth)
+            reader
+        }
+        .background(CWT.paper)
+        .navigationTitle(box.title)
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    model.compose()
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .help("Compose (C)")
+            }
+        }
+        .onAppear {
+            model.activeList = list
+            list.observe(db: model.db, filter: box)
+        }
+        .onChange(of: searchText) {
+            if searchText.isEmpty {
+                list.observe(db: model.db, filter: box)
+            } else {
+                list.observeSearch(db: model.db, query: searchText)
+            }
+        }
+    }
+
+    /// The placeholder sits underneath always; the reader slides in over it
+    /// from the right when a thread is selected, and back out when it isn't.
+    private var reader: some View {
+        ZStack {
+            Text("Select a conversation")
+                .font(CWT.caption)
+                .foregroundStyle(CWT.ink3)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(CWT.paper)
+            if let thread = model.selectedThread {
+                ThreadDetailView(thread: thread,
+                                 nextThread: neighbor(of: thread, offset: 1),
+                                 previousThread: neighbor(of: thread, offset: -1),
+                                 onPullNext: { model.selectNext(in: list.threads) },
+                                 onPullPrevious: { model.selectPrevious(in: list.threads) })
+                    .background(CWT.paper)
+                    .transition(.reader)
+            }
+        }
+        .clipped()
+    }
+
+    /// What pulling past the bottom (+1) or top (-1) of the reader moves to.
+    private func neighbor(of thread: MailThread, offset: Int) -> MailThread? {
+        let threads = list.threads
+        guard let idx = threads.firstIndex(where: { $0.key == thread.key }),
+              threads.indices.contains(idx + offset) else { return nil }
+        return threads[idx + offset]
+    }
+}
+
+/// The rule between list and reader, dragged to resize the list.
+private struct ListResizer: View {
+    @Binding var width: Double
+    /// Width when the drag began — translation is from the drag's start, so
+    /// accumulating per-change would compound into a runaway column.
+    @State private var startWidth: Double?
+    @State private var hovering = false
+
+    private var active: Bool { hovering || startWidth != nil }
+
+    var body: some View {
+        Rectangle()
+            .fill(active ? CWT.ink : CWT.hairline)
+            .frame(width: active ? 2 : 1)
+            .frame(width: 9)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                hovering = inside
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .onTapGesture(count: 2) {
+                withAnimation(.easeInOut(duration: 0.15)) { width = 340 }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let start = startWidth ?? width
+                        if startWidth == nil { startWidth = start }
+                        width = min(600, max(240, start + value.translation.width))
+                    }
+                    .onEnded { _ in startWidth = nil }
+            )
+            .help("Drag to resize the list — double-click to reset")
+    }
+}
+#endif
