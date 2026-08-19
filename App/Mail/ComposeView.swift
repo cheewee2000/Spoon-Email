@@ -205,6 +205,7 @@ struct ComposeView: View {
             }
         }
         .onAppear {
+            rich.onFileDrop = receiveFileURLs
             files = draft.attachments.filter { !$0.isInline }
             if !draft.cc.isEmpty || !draft.bcc.isEmpty { showCcBcc = true }
             focus = draft.to.isEmpty ? .to : .body
@@ -381,6 +382,31 @@ struct ComposeView: View {
                     guard fits(file) else { break }
                     files.append(file)
                 }
+            }
+        }
+        return true
+    }
+
+    /// Files dropped directly on the body text view, which reads its own drag
+    /// pasteboard — same routing as `receive`: images inline, the rest attached.
+    private func receiveFileURLs(_ urls: [URL]) -> Bool {
+        dropError = nil
+        for url in urls {
+            guard let data = try? Data(contentsOf: url), !data.isEmpty else {
+                dropError = "Couldn't read \(url.lastPathComponent)."
+                continue
+            }
+            let name = url.lastPathComponent
+            if let (payload, image) = InlineImageLoader.prepare(data: data, filename: name) {
+                guard fits(payload) else { break }
+                rich.insert(image: InlineImageAttachment(payload: payload, image: image))
+            } else {
+                let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+                    ?? "application/octet-stream"
+                let file = ComposeAttachment(filename: name, mimeType: mime,
+                                             data: data, isInline: false)
+                guard fits(file) else { break }
+                files.append(file)
             }
         }
         return true

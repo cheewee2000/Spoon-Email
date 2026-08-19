@@ -93,6 +93,11 @@ enum ComposeStyle {
 final class RichTextController: ObservableObject {
     weak var textView: PlatformTextView?
 
+    /// The composer's file-drop handler. NSTextView happily takes a file-URL
+    /// drag itself and pastes the path as text, so the editor intercepts
+    /// those drops and hands the URLs here instead.
+    var onFileDrop: (([URL]) -> Bool)?
+
     func toggleBold() { toggleTrait(.bold) }
     func toggleItalic() { toggleTrait(.italic) }
     func toggleUnderline() { toggleNumberAttribute(.underlineStyle) }
@@ -314,9 +319,42 @@ struct RichTextEditor: View {
 }
 
 #if os(macOS)
+/// NSTextView that hands file-URL drags to the composer (attach / insert
+/// inline) instead of pasting the path as text.
+final class DropAwareTextView: NSTextView {
+    var onFileDrop: (([URL]) -> Bool)?
+
+    private func fileURLs(_ sender: NSDraggingInfo) -> [URL] {
+        guard onFileDrop != nil else { return [] }
+        let read = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        return (read as? [URL]) ?? []
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        fileURLs(sender).isEmpty ? super.draggingEntered(sender) : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        fileURLs(sender).isEmpty ? super.draggingUpdated(sender) : .copy
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        fileURLs(sender).isEmpty ? super.prepareForDragOperation(sender) : true
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(sender)
+        guard !urls.isEmpty, let onFileDrop else {
+            return super.performDragOperation(sender)
+        }
+        return onFileDrop(urls)
+    }
+}
+
 extension RichTextEditor.Representable: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
+        let scroll = DropAwareTextView.scrollableTextView()
         guard let view = scroll.documentView as? NSTextView else { return scroll }
         view.isRichText = true
         view.allowsUndo = true
@@ -337,6 +375,11 @@ extension RichTextEditor.Representable: NSViewRepresentable {
             .foregroundColor: ComposeStyle.textColor,
         ]
         controller.textView = view
+        // Route through the controller so the closure the composer installs
+        // later (onAppear) is the one that runs.
+        (view as? DropAwareTextView)?.onFileDrop = { [weak controller] urls in
+            controller?.onFileDrop?(urls) ?? false
+        }
         controller.onEdit = { [weak view] in
             guard let view else { return }
             context.coordinator.sync(view)
