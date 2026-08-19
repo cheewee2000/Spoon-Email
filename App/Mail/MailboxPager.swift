@@ -20,6 +20,9 @@ struct MailboxPager: View {
 
     @State private var searchText = ""
     @StateObject private var searchList = ThreadListModel()
+    /// The list a tapped row came from — the reader walks it to find what
+    /// comes next. Whichever list is on screen claims it as it appears.
+    @State private var readerList = ThreadListModel()
     /// Which way the last move went, so the incoming page slides in from the
     /// side you swiped from.
     @State private var forward = true
@@ -43,7 +46,7 @@ struct MailboxPager: View {
                 Hairline()
                 page
             } else {
-                ThreadPageList(list: searchList, emptyText: "No matches")
+                ThreadPageList(list: searchList, emptyText: "No matches") { readerList = $0 }
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -62,7 +65,7 @@ struct MailboxPager: View {
             }
         }
         .navigationDestination(for: MailThread.self) { thread in
-            ThreadDetailView(thread: thread)
+            ThreadReader(start: thread, list: readerList)
         }
         .overlay {
             if items.isEmpty {
@@ -156,7 +159,7 @@ struct MailboxPager: View {
 
     private var page: some View {
         ZStack {
-            MailboxPage(item: current)
+            MailboxPage(item: current) { readerList = $0 }
                 .id(current)
                 .transition(.asymmetric(
                     insertion: .move(edge: forward ? .trailing : .leading),
@@ -184,12 +187,69 @@ struct MailboxPager: View {
 /// One mailbox as a page, with its own live query.
 private struct MailboxPage: View {
     let item: SidebarItem
+    let onActive: (ThreadListModel) -> Void
     @EnvironmentObject var model: AppModel
     @StateObject private var list = ThreadListModel(pageSize: 50)
 
     var body: some View {
-        ThreadPageList(list: list, emptyText: "Nothing here")
+        ThreadPageList(list: list, emptyText: "Nothing here", onActive: onActive)
             .onAppear { list.observe(db: model.db, filter: item.filter) }
+    }
+}
+
+/// One conversation, read in place: pull past the bottom (or archive) and the
+/// next one from the list it was opened from loads into the same screen, so
+/// a whole inbox can be read without bouncing back to the list.
+private struct ThreadReader: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var list: ThreadListModel
+    @State private var current: MailThread
+    /// Where `current` last sat in the list. Once it's archived it leaves the
+    /// list, and whatever slid into its slot is the next one to read.
+    @State private var position = 0
+
+    init(start: MailThread, list: ThreadListModel) {
+        self.list = list
+        _current = State(initialValue: start)
+    }
+
+    private var next: MailThread? {
+        let threads = list.threads
+        if let idx = threads.firstIndex(where: { $0.key == current.key }) {
+            return idx + 1 < threads.count ? threads[idx + 1] : nil
+        }
+        return position < threads.count ? threads[position] : nil
+    }
+
+    var body: some View {
+        ThreadDetailView(thread: current,
+                         onArchive: {
+                             let leaving = current
+                             advance(orDismiss: true)
+                             model.archive(leaving)
+                         },
+                         nextThread: next,
+                         onPullNext: { advance(orDismiss: false) })
+            .onAppear { track() }
+            .onChange(of: list.threads) { track() }
+    }
+
+    private func track() {
+        if let idx = list.threads.firstIndex(where: { $0.key == current.key }) {
+            position = idx
+        }
+        // Keep a page of threads ahead of the reader.
+        if list.threads.count - position < 10 { list.loadMore(db: model.db) }
+    }
+
+    private func advance(orDismiss: Bool) {
+        if let next {
+            position = list.threads.firstIndex { $0.key == next.key } ?? position
+            current = next
+        } else if orDismiss {
+            dismiss()
+        }
     }
 }
 
@@ -198,6 +258,7 @@ private struct ThreadPageList: View {
     @ObservedObject var list: ThreadListModel
     @EnvironmentObject var model: AppModel
     let emptyText: String
+    let onActive: (ThreadListModel) -> Void
 
     var body: some View {
         List {
@@ -236,6 +297,7 @@ private struct ThreadPageList: View {
         .scrollContentBackground(.hidden)
         .background(CWT.paper)
         .refreshable { await model.syncAndWait() }
+        .onAppear { onActive(list) }
         .onScrollGeometryChange(for: Bool.self) { geo in
             geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 600
         } action: { _, nearBottom in

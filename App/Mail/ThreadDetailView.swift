@@ -5,7 +5,27 @@ import MailCore
 struct ThreadDetailView: View {
     @EnvironmentObject var model: AppModel
     let thread: MailThread
+    /// iOS reader hooks. `onArchive` replaces the plain archive so the
+    /// reader can move on to the next thread; `nextThread` + `onPullNext`
+    /// drive the pull-past-the-bottom gesture. Both nil on the Mac.
+    var onArchive: (() -> Void)? = nil
+    var nextThread: MailThread? = nil
+    var onPullNext: (() -> Void)? = nil
     @StateObject private var detail = ThreadDetailModel()
+    @State private var pullProgress: CGFloat = 0
+
+    private func archive() {
+        if let onArchive { onArchive() } else { model.archive(thread) }
+    }
+
+    private func act(_ action: String) {
+        switch action {
+        case "reply": model.reply(to: thread, all: false)
+        case "replyall": model.reply(to: thread, all: true)
+        case "archive": archive()
+        default: break
+        }
+    }
 
     private var canUnsubscribe: Bool {
         detail.messages.last { !$0.listUnsubscribe.isEmpty } != nil
@@ -63,7 +83,7 @@ struct ThreadDetailView: View {
                     }
                     .help("Mark Unread (U)")
                     Button {
-                        model.archive(thread)
+                        archive()
                     } label: {
                         Image(systemName: "archivebox")
                     }
@@ -110,8 +130,18 @@ struct ThreadDetailView: View {
                 },
                 onMailto: { address in
                     model.compose(to: address)
-                }
+                },
+                onAction: { action in
+                    act(action)
+                },
+                onPull: { progress in
+                    if pullProgress != progress { pullProgress = progress }
+                },
+                onPullNext: onPullNext
             )
+            #if os(iOS)
+            .overlay(alignment: .bottom) { pullHint }
+            #endif
         }
         .onAppear {
             detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
@@ -126,6 +156,37 @@ struct ThreadDetailView: View {
             }
         }
     }
+
+    #if os(iOS)
+    /// Rises out of the bottom edge as you pull past the end of the thread:
+    /// what's next, and whether you've pulled far enough to go there.
+    @ViewBuilder private var pullHint: some View {
+        if pullProgress > 0, onPullNext != nil {
+            HStack(spacing: 6) {
+                if let nextThread {
+                    Image(systemName: pullProgress >= 1 ? "arrow.down.to.line" : "arrow.down")
+                        .imageScale(.small)
+                    Text(pullProgress >= 1 ? "Release for next" : "Pull for next")
+                    Text("·").foregroundStyle(CWT.ink3)
+                    Text(nextThread.subject.isEmpty ? "(no subject)" : nextThread.subject)
+                        .lineLimit(1)
+                        .foregroundStyle(CWT.ink2)
+                } else {
+                    Text("No more conversations")
+                        .foregroundStyle(CWT.ink3)
+                }
+            }
+            .font(CWT.caption)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(CWT.paper)
+            .overlay(alignment: .top) { Hairline() }
+            .opacity(Double(min(1, pullProgress * 1.5)))
+            .allowsHitTesting(false)
+        }
+    }
+    #endif
 }
 
 enum ThreadHTML {
@@ -283,7 +344,17 @@ enum ThreadHTML {
               padding: 0 8px; margin: 8px 0; font-size: 11px; }
           .frame { width: 100%; border: none; height: 120px; background: #fff; }
           ::selection { background: #b4d5fe; color: #111; }
+          .actions { display: flex; gap: 8px; padding: 14px 16px 0; }
+          .act { border: 1px solid var(--ink); color: var(--ink); padding: 5px 12px;
+                 font-size: 11px; text-decoration: none; font-family: inherit; }
+          .act.archive { margin-left: auto; }
+          .act:hover { opacity: 0.55; }
         </style></head><body>\(sections)
+        <div class="actions">
+          <a class="act" href="sdh-action://reply">&#x21A9; Reply</a>
+          <a class="act" href="sdh-action://replyall">&#x21A9;&#x21A9; Reply All</a>
+          <a class="act archive" href="sdh-action://archive">Archive</a>
+        </div>
         <script>
         // Links leave the app: hand them to the native side, which opens the
         // default browser. Navigating this window is the fallback — it lands in
@@ -571,6 +642,10 @@ struct MessageWebView: NSViewRepresentable {
     var onEditDraft: ((String) -> Void)?
     var onDeleteDraft: ((String) -> Void)?
     var onMailto: ((String) -> Void)?
+    var onAction: ((String) -> Void)?
+    /// iOS-only pull-for-next hooks; accepted here so the call site is shared.
+    var onPull: ((CGFloat) -> Void)?
+    var onPullNext: (() -> Void)?
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -590,6 +665,7 @@ struct MessageWebView: NSViewRepresentable {
         context.coordinator.onEditDraft = onEditDraft
         context.coordinator.onDeleteDraft = onDeleteDraft
         context.coordinator.onMailto = onMailto
+        context.coordinator.onAction = onAction
         if context.coordinator.needsLoad(html) {
             context.coordinator.load(html, into: view)
         }
@@ -604,6 +680,9 @@ struct MessageWebView: UIViewRepresentable {
     var onEditDraft: ((String) -> Void)?
     var onDeleteDraft: ((String) -> Void)?
     var onMailto: ((String) -> Void)?
+    var onAction: ((String) -> Void)?
+    var onPull: ((CGFloat) -> Void)?
+    var onPullNext: (() -> Void)?
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -613,6 +692,12 @@ struct MessageWebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.isOpaque = false
+        // Short threads still need to rubber-band, or there's nothing to pull.
+        view.scrollView.alwaysBounceVertical = true
+        // Ride along on the scroll view's own pan rather than taking over its
+        // delegate (WebKit owns that).
+        view.scrollView.panGestureRecognizer.addTarget(
+            context.coordinator, action: #selector(WebCoordinator.pulled(_:)))
         return view
     }
 
@@ -621,6 +706,9 @@ struct MessageWebView: UIViewRepresentable {
         context.coordinator.onEditDraft = onEditDraft
         context.coordinator.onDeleteDraft = onDeleteDraft
         context.coordinator.onMailto = onMailto
+        context.coordinator.onAction = onAction
+        context.coordinator.onPull = onPull
+        context.coordinator.onPullNext = onPullNext
         if context.coordinator.needsLoad(html) {
             context.coordinator.load(html, into: view)
         }
@@ -687,6 +775,53 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     var onEditDraft: ((String) -> Void)?
     var onDeleteDraft: ((String) -> Void)?
     var onMailto: ((String) -> Void)?
+    var onAction: ((String) -> Void)?
+    var onPull: ((CGFloat) -> Void)?
+    var onPullNext: (() -> Void)?
+
+    #if os(iOS)
+    /// How far past the end of the page the finger has to drag before
+    /// letting go moves on to the next conversation.
+    private static let pullDistance: CGFloat = 80
+    private var pullArmed = false
+    private var pullProgress: CGFloat = 0
+
+    /// Pull-past-the-bottom → next thread. Reads the overscroll off the
+    /// scroll view while the finger is down; the release is what commits.
+    @objc func pulled(_ gr: UIPanGestureRecognizer) {
+        guard let sv = gr.view as? UIScrollView else { return }
+        switch gr.state {
+        case .changed:
+            let maxOffset = max(-sv.adjustedContentInset.top,
+                                sv.contentSize.height + sv.adjustedContentInset.bottom - sv.bounds.height)
+            let over = sv.contentOffset.y - maxOffset
+            let progress = min(1, max(0, over / Self.pullDistance))
+            let armed = progress >= 1
+            if armed != pullArmed {
+                pullArmed = armed
+                if armed { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            }
+            report(progress)
+        case .ended:
+            let fire = pullArmed
+            pullArmed = false
+            report(0)
+            if fire { onPullNext?() }
+        case .cancelled, .failed:
+            pullArmed = false
+            report(0)
+        default:
+            break
+        }
+    }
+
+    private func report(_ progress: CGFloat) {
+        // Throttle: the parent view re-renders on every change.
+        guard abs(progress - pullProgress) > 0.03 || progress == 0 || progress == 1 else { return }
+        pullProgress = progress
+        onPull?(progress)
+    }
+    #endif
 
     /// Opens a link outside the app: mail addresses go to our own composer,
     /// everything else to the default browser in its own window.
@@ -746,6 +881,12 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                 default: break
                 }
             }
+            decisionHandler(.cancel)
+            return
+        }
+        // Footer buttons: sdh-action://reply | replyall | archive
+        if url.scheme == "sdh-action" {
+            if let action = url.host { onAction?(action) }
             decisionHandler(.cancel)
             return
         }
