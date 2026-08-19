@@ -262,11 +262,11 @@ enum ThreadHTML {
                     : "<div class='plain quoted'>\(escape(m.snippet))</div>"
             } else {
                 let (main, quoted) = MimeParser.splitQuoted(m.bodyText ?? "")
-                var plain = "<div class='plain'>\(escape(main))</div>"
+                var plain = "<div class='plain'>\(linkify(main))</div>"
                 if let quoted {
                     plain += """
                     <details class="plainq"><summary>•••</summary>\
-                    <div class='plain quoted'>\(escape(quoted))</div></details>
+                    <div class='plain quoted'>\(linkify(quoted))</div></details>
                     """
                 }
                 body = plain
@@ -371,6 +371,7 @@ enum ThreadHTML {
                   text-decoration: none; color: inherit; }
           .chipsize { color: var(--ink3); }
           .plain { white-space: pre-wrap; overflow-x: auto; }
+          .plain a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
           .plain.quoted { color: var(--ink3); }
           details.plainq summary { cursor: pointer; color: var(--ink2); list-style: none;
               display: inline-block; border: 1px solid var(--hairline);
@@ -430,6 +431,52 @@ enum ThreadHTML {
             if (t.length < 200 && /^On\\s/.test(t) && /wrote:$/.test(t)) return blocks[i];
           }
           return null;
+        }
+        // Bare URLs and addresses in an HTML email that the sender didn't
+        // link: wrap them in anchors. Text nodes only, never inside an
+        // existing link or anything that isn't prose.
+        var URL_RE = /(https?:\\/\\/[^\\s<>"']+|www\\.[^\\s<>"']+|[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+)/g;
+        function linkifyDoc(d) {
+          try {
+            if (!d.body) return;
+            var walker = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT, {
+              acceptNode: function (n) {
+                if (!n.nodeValue || !/[:@.]/.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+                var p = n.parentElement;
+                while (p) {
+                  var t = p.tagName;
+                  if (t === 'A' || t === 'SCRIPT' || t === 'STYLE' || t === 'TEXTAREA' ||
+                      t === 'BUTTON' || t === 'TITLE') return NodeFilter.FILTER_REJECT;
+                  p = p.parentElement;
+                }
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            });
+            var nodes = [];
+            while (walker.nextNode()) nodes.push(walker.currentNode);
+            nodes.forEach(function (n) {
+              var text = n.nodeValue;
+              URL_RE.lastIndex = 0;
+              if (!URL_RE.test(text)) return;
+              URL_RE.lastIndex = 0;
+              var frag = d.createDocumentFragment(), last = 0, m;
+              while ((m = URL_RE.exec(text))) {
+                var raw = m[0], trail = '';
+                // Don't take trailing punctuation along for the ride.
+                while (/[.,;:)\\]}'"]$/.test(raw)) { trail = raw.slice(-1) + trail; raw = raw.slice(0, -1); }
+                if (m.index > last) frag.appendChild(d.createTextNode(text.slice(last, m.index)));
+                var a = d.createElement('a');
+                a.href = raw.indexOf('@') > -1 && raw.indexOf('://') === -1 ? 'mailto:' + raw
+                       : raw.indexOf('://') === -1 ? 'https://' + raw : raw;
+                a.textContent = raw;
+                frag.appendChild(a);
+                if (trail) frag.appendChild(d.createTextNode(trail));
+                last = m.index + m[0].length;
+              }
+              if (last < text.length) frag.appendChild(d.createTextNode(text.slice(last)));
+              n.parentNode.replaceChild(frag, n);
+            });
+          } catch (err) {}
         }
         function collapseQuotes(f, d) {
           var first = findQuoteStart(d);
@@ -507,6 +554,7 @@ enum ThreadHTML {
             if (f.__hookedDoc !== d && hasContent) {
               f.__hookedDoc = d;
               f.dataset.hooked = '1';
+              linkifyDoc(d);
               collapseQuotes(f, d);
               d.addEventListener('click', function (e) {
                 if (e.target.tagName === 'BUTTON') return;
@@ -664,6 +712,44 @@ enum ThreadHTML {
         (raw.removingPercentEncoding ?? raw)
             .trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
             .lowercased()
+    }
+
+    /// Escapes plain text and turns bare URLs / addresses into links.
+    /// Runs on the escaped text so the anchors survive escaping and nothing
+    /// in the body can smuggle markup in around them.
+    static func linkify(_ s: String) -> String {
+        let text = escape(s)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return text }
+        let ns = text as NSString
+        var out = ""
+        var pos = 0
+        for match in detector.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            guard let url = match.url else { continue }
+            var range = match.range
+            // The detector happily takes trailing punctuation along; trim it.
+            while range.length > 0,
+                  ".,;:)]}'".contains(ns.substring(with: NSRange(location: range.location + range.length - 1, length: 1))) {
+                range.length -= 1
+            }
+            guard range.length > 0 else { continue }
+            // `shown` is already HTML-escaped (so "&amp;" inside a query string
+            // decodes back to "&" in the href too); only quotes need care.
+            let shown = ns.substring(with: range)
+            let href: String
+            if url.scheme == "mailto" || (shown.contains("@") && !shown.contains("://")) {
+                href = shown.hasPrefix("mailto:") ? shown : "mailto:" + shown
+            } else if shown.range(of: "^[a-zA-Z][a-zA-Z0-9+.-]*:", options: .regularExpression) != nil {
+                href = shown
+            } else {
+                href = "https://" + shown
+            }
+            out += ns.substring(with: NSRange(location: pos, length: range.location - pos))
+            out += "<a href=\"\(href.replacingOccurrences(of: "\"", with: "&quot;"))\">\(shown)</a>"
+            pos = range.location + range.length
+        }
+        out += ns.substring(from: pos)
+        return out
     }
 
     static func escape(_ s: String) -> String {
