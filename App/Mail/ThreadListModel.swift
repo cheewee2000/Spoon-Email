@@ -54,7 +54,9 @@ final class ThreadListModel: ObservableObject {
             list.hidden[key] = Date()
             list.pendingApply?.cancel()
             list.pendingApply = nil
-            list.threads.removeAll { $0.key == key }
+            withAnimation(.easeInOut(duration: 0.28)) {
+                list.threads.removeAll { $0.key == key }
+            }
         }
     }
 
