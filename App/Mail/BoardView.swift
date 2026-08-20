@@ -305,7 +305,15 @@ private struct BoardColumn: View {
             if focused { model.activeList = list }
         }
         .onChange(of: focused) {
-            if focused { model.activeList = list }
+            if focused {
+                model.activeList = list
+                // An arrow-key hop lands on the column's top email rather
+                // than an empty reader.
+                if model.selectTopOnFocus {
+                    model.selectTopOnFocus = false
+                    model.select(list.threads.first)
+                }
+            }
             observe()
         }
         .onChange(of: searchQuery) { observe() }

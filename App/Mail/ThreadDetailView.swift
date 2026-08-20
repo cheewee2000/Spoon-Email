@@ -526,7 +526,7 @@ enum ThreadHTML {
           if (!first) return;
           // The trail runs from the marker to the end of the message, but not
           // always nested inside it (Outlook puts it in following siblings) —
-          // so hide the marker plus everything after it in document order.
+          // so fold the marker plus everything after it in document order.
           var els = [first];
           var sib = first.nextElementSibling;
           while (sib) { els.push(sib); sib = sib.nextElementSibling; }
@@ -536,18 +536,21 @@ enum ThreadHTML {
             while (s) { els.push(s); s = s.nextElementSibling; }
             anc = anc.parentElement;
           }
-          var btn = d.createElement('button');
-          btn.textContent = '•••';
-          btn.title = 'Show / hide quoted text';
-          btn.style.cssText = 'margin:8px 0;padding:1px 8px;border:1px solid #e3e3e3;border-radius:0;background:transparent;cursor:pointer;font-size:12px;color:#8a8a8a;font-family:inherit';
-          first.parentNode.insertBefore(btn, first);
-          els.forEach(function (el) { el.style.display = 'none'; });
-          btn.addEventListener('click', function (ev) {
-            ev.preventDefault(); ev.stopPropagation();
-            var hidden = first.style.display === 'none';
-            els.forEach(function (el) { el.style.display = hidden ? '' : 'none'; });
-            setTimeout(fitAll, 0);
-          });
+          // The fold must be a native <details>: the frame is sandboxed
+          // without allow-scripts, and WebKit refuses to run event listeners
+          // in a script-disabled document even when the parent attached them
+          // — a button with a click handler renders but never fires. The
+          // <details> toggle is default behavior, not script, so it survives
+          // the sandbox; the ResizeObserver in watch() (parent-realm, so it
+          // does run) re-fits the frame when it opens.
+          var det = d.createElement('details');
+          det.className = 'sdh-quote';
+          var sum = d.createElement('summary');
+          sum.textContent = '•••';
+          sum.title = 'Show / hide quoted text';
+          det.appendChild(sum);
+          first.parentNode.insertBefore(det, first);
+          els.forEach(function (el) { det.appendChild(el); });
         }
         // Measure the CONTENT, not the frame. `documentElement.scrollHeight`
         // is clamped to the iframe's viewport, so once the frame has been
@@ -673,6 +676,14 @@ enum ThreadHTML {
              importance the later rule wins, and the email's <style> comes
              after the one above. Last word goes here. */
           html, body { height: auto !important; min-height: 0 !important; max-height: none !important; }
+          /* The quoted-trail fold collapseQuotes builds. Down here so no
+             email stylesheet can restyle it out of looking like a control. */
+          details.sdh-quote > summary { list-style: none; display: inline-block;
+            margin: 8px 0; padding: 1px 8px; border: 1px solid #e3e3e3;
+            cursor: pointer; font-size: 12px; color: #8a8a8a; font-family: inherit;
+            -webkit-user-select: none; }
+          details.sdh-quote > summary::-webkit-details-marker { display: none; }
+          details.sdh-quote > summary::marker { content: ""; }
         </style>
         """
     }

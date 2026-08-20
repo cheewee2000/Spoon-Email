@@ -577,25 +577,37 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Left/right arrows: hop focus to the neighboring board column.
+    /// Set by an arrow-key column hop: the newly focused column should select
+    /// its top thread the moment its list becomes the active one (the column
+    /// consumes this from its `focused` change — the hop itself can't reach
+    /// the destination column's list, which lives in the column's view).
+    var selectTopOnFocus = false
+
+    /// Left/right arrows: hop focus to the neighboring board column, landing
+    /// on its top email.
     func focusColumn(offset: Int) {
         let columns = order.boardItems.map(\.filter)
         guard !columns.isEmpty else { return }
-        guard let current = mailbox else {
+        let destination: MailboxFilter?
+        if let current = mailbox {
+            if let idx = columns.firstIndex(of: current) {
+                let next = idx + offset
+                guard columns.indices.contains(next) else { return }
+                destination = columns[next]
+            } else if offset > 0 {
+                // A stand-in column (an account, a box kept off the board)
+                // sits at the far left, so only a step right leads anywhere.
+                destination = columns.first
+            } else {
+                return
+            }
+        } else {
             // From the board home, either arrow steps into the strip at its
             // near end: right focuses the first column, left the last.
-            navigate(to: offset > 0 ? columns.first : columns.last)
-            return
+            destination = offset > 0 ? columns.first : columns.last
         }
-        if let idx = columns.firstIndex(of: current) {
-            let next = idx + offset
-            guard columns.indices.contains(next) else { return }
-            navigate(to: columns[next])
-        } else if offset > 0 {
-            // A stand-in column (an account, a box kept off the board) sits
-            // at the far left, so only a step right leads anywhere.
-            navigate(to: columns.first)
-        }
+        selectTopOnFocus = true
+        navigate(to: destination)
     }
 
     /// Archive the selection and advance to the next thread (Superhuman "e").
