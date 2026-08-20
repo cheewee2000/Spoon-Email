@@ -402,18 +402,36 @@ enum ThreadHTML {
           } catch (err) {}
           window.location.href = href;
         }
-        // Tell the native side whether the page is scrolled to its end — the
-        // Mac's pull-for-next can't read the web view's scroll position.
+        // Tell the native side where the page is scrolled — the Mac's
+        // pull-for-next needs the edges, and the position comes back through
+        // restoreScroll when a re-render reloads the page.
         function postScroll() {
           try {
             var end = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
             var start = window.scrollY <= 2;
-            window.webkit.messageHandlers.sdhScroll.postMessage((end ? 1 : 0) + (start ? 2 : 0));
+            window.webkit.messageHandlers.sdhScroll.postMessage({
+              b: (end ? 1 : 0) + (start ? 2 : 0), y: window.scrollY });
           } catch (err) {}
         }
         window.addEventListener('scroll', postScroll, { passive: true });
         window.addEventListener('load', postScroll);
         if (window.ResizeObserver) new ResizeObserver(postScroll).observe(document.body);
+        // Re-renders of the open thread (a draft autosave, say) reload the
+        // whole page; the native side hands back where the reader was. The
+        // page grows as message iframes fit, so keep nudging until the
+        // target sticks, the reader scrolls, or we give up.
+        function restoreScroll(y) {
+          var tries = 0, cancelled = false;
+          function cancel() { cancelled = true; }
+          window.addEventListener('wheel', cancel, { once: true, passive: true });
+          window.addEventListener('touchstart', cancel, { once: true, passive: true });
+          (function attempt() {
+            if (cancelled || tries++ > 40) return;
+            window.scrollTo(0, y);
+            if (Math.abs(window.scrollY - y) <= 2) return;
+            setTimeout(attempt, 50);
+          })();
+        }
         // Same idea sideways: whether anything in the page (the page itself,
         // a plain-text body, a message iframe's document) still has room to
         // scroll horizontally, per direction. The native side uses it to
@@ -929,11 +947,25 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     private var loadedHTML: String?
     private var retriedHTML: String?
     private weak var webView: WKWebView?
+    /// Where the reader is, per the page's scroll reports, and where to put
+    /// them back after a same-thread re-render — a draft autosave, a
+    /// read-state change — reloads the page out from under them.
+    private var lastScrollY: Double = 0
+    private var restoreScrollY: Double?
 
     func needsLoad(_ html: String) -> Bool { pendingHTML != html }
 
     func load(_ html: String, into view: WKWebView) {
         webView = view
+        // A new thread gets a fresh coordinator, so a reload over a finished
+        // page is the same thread re-rendered — keep the reader's place.
+        if loadedHTML != nil {
+            #if os(macOS)
+            restoreScrollY = lastScrollY
+            #else
+            restoreScrollY = Double(view.scrollView.contentOffset.y)
+            #endif
+        }
         pendingHTML = html
         loadedHTML = nil
         retriedHTML = nil
@@ -956,6 +988,10 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loadedHTML = pendingHTML
+        if let y = restoreScrollY {
+            restoreScrollY = nil
+            if y > 1 { webView.evaluateJavaScript("restoreScroll(\(Int(y)))") }
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
@@ -1115,9 +1151,11 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
     func userContentController(_ controller: WKUserContentController,
                                didReceive message: WKScriptMessage) {
         if message.name == "sdhScroll" {
-            let bits = (message.body as? Int) ?? 0
+            let body = message.body as? [String: Any]
+            let bits = (body?["b"] as? Int) ?? 0
             atEnd = bits & 1 != 0
             atStart = bits & 2 != 0
+            lastScrollY = (body?["y"] as? Double) ?? lastScrollY
             return
         }
         #if os(macOS)
