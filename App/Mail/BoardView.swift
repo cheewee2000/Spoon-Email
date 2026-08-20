@@ -8,11 +8,12 @@ import AppKit
 ///
 /// There is no separate "mailbox view" — conceptually you are always on the
 /// board, and opening a mailbox just makes room. Focusing a column (clicking
-/// one of its rows, its header, or its rail entry) slides that column to the
-/// left edge: the columns before it are pushed off-screen left, and the
-/// reader grows into the space after it, pushing the rest off-screen right.
-/// Escape closes the reader and the columns slide home — with the board
-/// re-anchored so the column you were reading holds the left edge.
+/// one of its rows, its header, or its rail entry) opens the reader right
+/// after it and slides the strip so the column sits flush against the side
+/// panel. The strip stays freely scrollable the whole time: pan left to the
+/// columns behind you, pan right past the open email to the rest — one
+/// email open at a time, inline in the row of columns. Escape closes the
+/// reader where it stands and the columns close ranks.
 ///
 /// The board and the rail read the same `SidebarOrder`, so reordering either
 /// one reorders both — drag a column header here, drag a row there, same
@@ -23,12 +24,14 @@ struct BoardView: View {
     @Binding var searchText: String
     var searchFocused: FocusState<Bool>.Binding
 
-    /// Where the horizontal scroll sits. Frozen while a column is focused
-    /// (scrolling is disabled then), so the strip offset has a stable base.
-    @State private var scrollX: CGFloat = 0
-    /// Viewport width, for computing how far the reader-less board can scroll.
+    /// The side panel floats over the canvas as a leading content inset (its
+    /// width changes with the rail's minimized/expanded state); everything
+    /// justifies to its trailing edge, so raw scroll offsets need this
+    /// taken out.
+    @State private var insetLeading: CGFloat = 0
+    /// Visible canvas width right of the side panel.
     @State private var viewportW: CGFloat = 0
-    /// Programmatic handle on the scroll, for the pre-escape re-base.
+    /// Programmatic handle on the scroll, for the focus slide.
     @State private var scrollPos = ScrollPosition()
 
     private var focused: MailboxFilter? { model.mailbox }
@@ -58,30 +61,29 @@ struct BoardView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    ForEach(slots) { slot in
-                        slotView(slot, in: geo)
-                    }
+        ScrollView(.horizontal) {
+            HStack(spacing: 0) {
+                ForEach(slots) { slot in
+                    slotView(slot)
                 }
-                .offset(x: stripOffset)
             }
-            .scrollDisabled(focused != nil)
-            .scrollPosition($scrollPos)
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.contentOffset.x
-            } action: { _, x in
-                // Content resizes while focused (the reader claims width);
-                // ignore anything the clamping does until we're back.
-                if focused == nil { scrollX = x }
+        }
+        .scrollPosition($scrollPos)
+        .onScrollGeometryChange(for: ScrollGeometry.self) { geo in
+            geo
+        } action: { _, geo in
+            insetLeading = geo.contentInsets.leading
+            viewportW = geo.containerSize.width - geo.contentInsets.leading - geo.contentInsets.trailing
+        }
+        .onChange(of: model.mailbox) { _, box in
+            // The focus slide: bring the focused column flush against the
+            // side panel (as flush as the strip's length allows), on the same
+            // spring the reader opens with. From here on the strip is the
+            // user's to pan; escaping collapses the reader wherever they are.
+            guard let box else { return }
+            withAnimation(CWT.nav) {
+                scrollPos.scrollTo(x: leadingEdge(of: box) - insetLeading)
             }
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.containerSize.width
-            } action: { _, w in
-                viewportW = w
-            }
-            .onAppear { installUnfocusSnap() }
         }
         .background(CWT.paper)
         .overlay {
@@ -113,7 +115,7 @@ struct BoardView: View {
 
     /// One column, its resizer, and — while it's the focused one — the
     /// reader that opens up after it.
-    @ViewBuilder private func slotView(_ slot: BoardSlot, in geo: GeometryProxy) -> some View {
+    @ViewBuilder private func slotView(_ slot: BoardSlot) -> some View {
         let isFocused = focused == slot.filter
         HStack(spacing: 0) {
             BoardColumn(slot: slot, order: order,
@@ -123,7 +125,7 @@ struct BoardView: View {
             ColumnResizer(slot: slot, order: order)
             if isFocused {
                 ReaderPane()
-                    .frame(width: readerWidth(for: slot, in: geo))
+                    .frame(width: readerWidth(for: slot))
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -134,57 +136,26 @@ struct BoardView: View {
                     : .move(edge: .leading).combined(with: .opacity))
     }
 
-    /// How far the strip shifts left so the focused column's leading edge
-    /// lands on the viewport's: everything before it is pushed off-screen.
-    /// `scrollX` cancels whatever scroll the board was already at.
-    private var stripOffset: CGFloat {
-        guard let box = focused else { return 0 }
+    /// Where a column's leading edge sits in the strip, rail-relative.
+    private func leadingEdge(of box: MailboxFilter) -> CGFloat {
         var left: CGFloat = 0
         for slot in slots {
             if slot.filter == box { break }
             left += order.width(key: slot.widthKey) + ColumnResizer.grabWidth
         }
-        return scrollX - left
+        return left
     }
 
     /// The reader takes the space right of the focused column — up to a cap,
     /// past which an email is just uncomfortably wide lines. On a screen
     /// wider than column + cap, the columns after the reader stay partly in
     /// view, and clicking a row in one shoves the focus over to it.
-    private func readerWidth(for slot: BoardSlot, in geo: GeometryProxy) -> CGFloat {
+    private func readerWidth(for slot: BoardSlot) -> CGFloat {
         min(Self.maxReaderWidth,
-            max(320, geo.size.width - order.width(key: slot.widthKey) - ColumnResizer.grabWidth))
+            max(320, viewportW - order.width(key: slot.widthKey) - ColumnResizer.grabWidth))
     }
 
     private static let maxReaderWidth: CGFloat = 820
-
-    /// Hands the model the pre-escape re-base: move the real scroll to where
-    /// the collapse will land — under the focused column, clamped to what
-    /// the reader-less board can actually reach — while the strip offset is
-    /// re-based to match, so nothing moves on screen. The animated clear
-    /// that follows then only closes the reader and slides the right-hand
-    /// columns home, with the column you were reading pinned to the left
-    /// edge, fully visible.
-    private func installUnfocusSnap() {
-        let model = self.model
-        let order = self.order
-        model.willUnfocus = { [weak model, weak order] in
-            guard let model, let order,
-                  let box = model.mailbox,
-                  let idx = order.boardItems.firstIndex(where: { $0.filter == box })
-            else { return }   // a stand-in column: the board keeps its old scroll
-            var left: CGFloat = 0
-            var total: CGFloat = 0
-            for (i, item) in order.boardItems.enumerated() {
-                let w = order.width(item) + ColumnResizer.grabWidth
-                if i < idx { left += w }
-                total += w
-            }
-            let target = min(left, max(0, total - viewportW))
-            scrollX = target
-            scrollPos.scrollTo(x: target)
-        }
-    }
 }
 
 /// A column on the canvas: one of the rail's board items, or a stand-in for

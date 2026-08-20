@@ -1098,30 +1098,12 @@ final class AppModel: ObservableObject {
             return
         }
         readerSlideForward = true
-        if box == nil {
-            activeList = nil
-            // Let the canvas snap its scroll under the focused column first
-            // (an invisible re-base), so the column holds the left edge and
-            // the only motion going home is the reader collapsing. The
-            // animated clear waits a tick so the re-base commits unanimated.
-            willUnfocus?()
-            DispatchQueue.main.async {
-                withAnimation(CWT.nav) {
-                    self.mailbox = nil
-                    self.selectedThread = nil
-                }
-            }
-            return
-        }
+        if box == nil { activeList = nil }
         withAnimation(CWT.nav) {
             mailbox = box
             selectedThread = thread
         }
     }
-
-    /// Installed by the canvas: called just before an animated return to the
-    /// board, while the focused column is still focused.
-    var willUnfocus: (() -> Void)?
 
     /// Animated selection change: the reader slides the way you moved,
     /// judged from where the two threads sit in the visible list.
