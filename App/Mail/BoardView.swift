@@ -11,8 +11,8 @@ import AppKit
 /// one of its rows, its header, or its rail entry) slides that column to the
 /// left edge: the columns before it are pushed off-screen left, and the
 /// reader grows into the space after it, pushing the rest off-screen right.
-/// Escape reverses the shove and the board is exactly where you left it,
-/// scroll position included.
+/// Escape closes the reader and the columns slide home — with the board
+/// re-anchored so the column you were reading holds the left edge.
 ///
 /// The board and the rail read the same `SidebarOrder`, so reordering either
 /// one reorders both — drag a column header here, drag a row there, same
@@ -24,9 +24,12 @@ struct BoardView: View {
     var searchFocused: FocusState<Bool>.Binding
 
     /// Where the horizontal scroll sits. Frozen while a column is focused
-    /// (scrolling is disabled then), so the strip offset has a stable base
-    /// and unfocusing lands back on the exact same scroll position.
+    /// (scrolling is disabled then), so the strip offset has a stable base.
     @State private var scrollX: CGFloat = 0
+    /// Viewport width, for computing how far the reader-less board can scroll.
+    @State private var viewportW: CGFloat = 0
+    /// Programmatic handle on the scroll, for the pre-escape re-base.
+    @State private var scrollPos = ScrollPosition()
 
     private var focused: MailboxFilter? { model.mailbox }
 
@@ -65,6 +68,7 @@ struct BoardView: View {
                 .offset(x: stripOffset)
             }
             .scrollDisabled(focused != nil)
+            .scrollPosition($scrollPos)
             .onScrollGeometryChange(for: CGFloat.self) { geo in
                 geo.contentOffset.x
             } action: { _, x in
@@ -72,6 +76,12 @@ struct BoardView: View {
                 // ignore anything the clamping does until we're back.
                 if focused == nil { scrollX = x }
             }
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.containerSize.width
+            } action: { _, w in
+                viewportW = w
+            }
+            .onAppear { installUnfocusSnap() }
         }
         .background(CWT.paper)
         .overlay {
@@ -137,10 +147,43 @@ struct BoardView: View {
         return scrollX - left
     }
 
-    /// The reader takes everything right of the focused column, and shoves
-    /// the remaining columns off-screen doing it.
+    /// The reader takes the space right of the focused column — up to a cap,
+    /// past which an email is just uncomfortably wide lines. On a screen
+    /// wider than column + cap, the columns after the reader stay partly in
+    /// view, and clicking a row in one shoves the focus over to it.
     private func readerWidth(for slot: BoardSlot, in geo: GeometryProxy) -> CGFloat {
-        max(320, geo.size.width - order.width(key: slot.widthKey) - ColumnResizer.grabWidth)
+        min(Self.maxReaderWidth,
+            max(320, geo.size.width - order.width(key: slot.widthKey) - ColumnResizer.grabWidth))
+    }
+
+    private static let maxReaderWidth: CGFloat = 820
+
+    /// Hands the model the pre-escape re-base: move the real scroll to where
+    /// the collapse will land — under the focused column, clamped to what
+    /// the reader-less board can actually reach — while the strip offset is
+    /// re-based to match, so nothing moves on screen. The animated clear
+    /// that follows then only closes the reader and slides the right-hand
+    /// columns home, with the column you were reading pinned to the left
+    /// edge, fully visible.
+    private func installUnfocusSnap() {
+        let model = self.model
+        let order = self.order
+        model.willUnfocus = { [weak model, weak order] in
+            guard let model, let order,
+                  let box = model.mailbox,
+                  let idx = order.boardItems.firstIndex(where: { $0.filter == box })
+            else { return }   // a stand-in column: the board keeps its old scroll
+            var left: CGFloat = 0
+            var total: CGFloat = 0
+            for (i, item) in order.boardItems.enumerated() {
+                let w = order.width(item) + ColumnResizer.grabWidth
+                if i < idx { left += w }
+                total += w
+            }
+            let target = min(left, max(0, total - viewportW))
+            scrollX = target
+            scrollPos.scrollTo(x: target)
+        }
     }
 }
 
