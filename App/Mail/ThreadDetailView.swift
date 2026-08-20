@@ -414,6 +414,32 @@ enum ThreadHTML {
         window.addEventListener('scroll', postScroll, { passive: true });
         window.addEventListener('load', postScroll);
         if (window.ResizeObserver) new ResizeObserver(postScroll).observe(document.body);
+        // Same idea sideways: whether anything in the page (the page itself,
+        // a plain-text body, a message iframe's document) still has room to
+        // scroll horizontally, per direction. The native side uses it to
+        // decide if a sideways pan belongs to the email or the board strip.
+        function postHScroll() {
+          try {
+            var l = false, r = false;
+            var els = [document.scrollingElement];
+            document.querySelectorAll('.plain').forEach(function (e) { els.push(e); });
+            document.querySelectorAll('iframe.frame').forEach(function (f) {
+              try {
+                var d = f.contentDocument;
+                if (d && d.scrollingElement) els.push(d.scrollingElement);
+              } catch (e) {}
+            });
+            els.forEach(function (e) {
+              if (!e) return;
+              if (e.scrollLeft > 1) l = true;
+              if (e.scrollLeft + e.clientWidth < e.scrollWidth - 1) r = true;
+            });
+            window.webkit.messageHandlers.sdhHScroll.postMessage((l ? 1 : 0) + (r ? 2 : 0));
+          } catch (err) {}
+        }
+        window.addEventListener('scroll', postHScroll, { passive: true, capture: true });
+        window.addEventListener('load', postHScroll);
+        if (window.ResizeObserver) new ResizeObserver(postHScroll).observe(document.body);
         function toggleMsg(hdr) {
           hdr.parentElement.classList.toggle('collapsed');
           setTimeout(fitAll, 0);
@@ -561,6 +587,10 @@ enum ThreadHTML {
                 if (a && a.href) { e.preventDefault(); e.stopPropagation(); openExternal(a.href); }
               }, true);
               watch(f, d);
+              // Iframe-internal scrolls never reach the parent window; report
+              // horizontal edges from in here too.
+              d.addEventListener('scroll', postHScroll, { passive: true, capture: true });
+              postHScroll();
             }
             var section = f.closest('section');
             if (section && section.classList.contains('collapsed')) return;
@@ -767,19 +797,28 @@ enum ThreadHTML {
 
 #if os(macOS)
 /// A web view that treats sideways trackpad pans the way the columns do:
-/// they belong to the board strip, not the email. Each gesture's dominant
-/// axis is latched when it begins — vertical (and diagonal-but-mostly-
-/// vertical) scrolling stays in the message, horizontal is handed up the
-/// responder chain to the enclosing horizontal scroller, momentum included.
+/// they belong to the board strip — unless the email itself still has
+/// horizontal room that way (a wide table, a plain-text body), in which case
+/// the email scrolls first and the strip takes over on the next gesture past
+/// the edge. Each gesture's route is latched when it begins — vertical (and
+/// diagonal-but-mostly-vertical) scrolling stays in the message, horizontal
+/// goes up the responder chain to the enclosing horizontal scroller,
+/// momentum included.
 final class PanThroughWebView: WKWebView {
+    /// Whether the page reports horizontal room of its own, per direction
+    /// (kept current by the page's sdhHScroll messages).
+    var contentCanPanLeft = false
+    var contentCanPanRight = false
     private var panningStrip = false
 
     override func scrollWheel(with event: NSEvent) {
-        if event.phase == .began {
-            panningStrip = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
-        } else if event.phase == [] && event.momentumPhase == [] {
-            // A legacy wheel has no gesture to latch; route per event.
-            panningStrip = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        // A new trackpad gesture — or a lone legacy-wheel tick — picks its
+        // route; momentum events keep whatever the gesture latched.
+        if event.phase == .began || (event.phase == [] && event.momentumPhase == []) {
+            let horizontal = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+            // Positive deltaX pans toward content on the left.
+            let contentTakesIt = event.scrollingDeltaX > 0 ? contentCanPanLeft : contentCanPanRight
+            panningStrip = horizontal && !contentTakesIt
         }
         if panningStrip {
             nextResponder?.scrollWheel(with: event)
@@ -805,6 +844,7 @@ struct MessageWebView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         config.userContentController.add(context.coordinator, name: "sdhOpen")
         config.userContentController.add(context.coordinator, name: "sdhScroll")
+        config.userContentController.add(context.coordinator, name: "sdhHScroll")
         // Parent page JS sizes the message iframes; email content itself
         // stays script-free (iframe sandbox has no allow-scripts).
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -1080,6 +1120,16 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             atStart = bits & 2 != 0
             return
         }
+        #if os(macOS)
+        if message.name == "sdhHScroll" {
+            let bits = (message.body as? Int) ?? 0
+            if let view = message.webView as? PanThroughWebView {
+                view.contentCanPanLeft = bits & 1 != 0
+                view.contentCanPanRight = bits & 2 != 0
+            }
+            return
+        }
+        #endif
         guard message.name == "sdhOpen",
               let href = message.body as? String,
               let url = URL(string: href) else { return }
