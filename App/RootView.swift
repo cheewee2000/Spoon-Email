@@ -231,6 +231,27 @@ struct RootView: View {
             model.compose()
             return true
         }
+        // Arrow keys: up/down walk the focused column's list (same as j/k),
+        // left/right hop the focus to the neighboring column — and from the
+        // board home they step into the strip at its near end.
+        switch event.keyCode {
+        case 126: // up
+            guard model.mailbox != nil else { return false }
+            model.selectPrevious(in: model.activeList?.threads ?? [])
+            return true
+        case 125: // down
+            guard model.mailbox != nil else { return false }
+            model.selectNext(in: model.activeList?.threads ?? [])
+            return true
+        case 123: // left
+            model.focusColumn(offset: -1)
+            return true
+        case 124: // right
+            model.focusColumn(offset: 1)
+            return true
+        default:
+            break
+        }
         // The row under the pointer beats the list selection as the target,
         // so hover-then-keystroke triages without a click — including on the
         // board, whose columns have no selection of their own.

@@ -577,6 +577,27 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Left/right arrows: hop focus to the neighboring board column.
+    func focusColumn(offset: Int) {
+        let columns = order.boardItems.map(\.filter)
+        guard !columns.isEmpty else { return }
+        guard let current = mailbox else {
+            // From the board home, either arrow steps into the strip at its
+            // near end: right focuses the first column, left the last.
+            navigate(to: offset > 0 ? columns.first : columns.last)
+            return
+        }
+        if let idx = columns.firstIndex(of: current) {
+            let next = idx + offset
+            guard columns.indices.contains(next) else { return }
+            navigate(to: columns[next])
+        } else if offset > 0 {
+            // A stand-in column (an account, a box kept off the board) sits
+            // at the far left, so only a step right leads anywhere.
+            navigate(to: columns.first)
+        }
+    }
+
     /// Archive the selection and advance to the next thread (Superhuman "e").
     func archiveSelected(in threads: [MailThread]) {
         guard let sel = selectedThread else { return }
