@@ -766,6 +766,29 @@ enum ThreadHTML {
 // MARK: - WKWebView wrapper (email JS sandboxed, links open externally)
 
 #if os(macOS)
+/// A web view that treats sideways trackpad pans the way the columns do:
+/// they belong to the board strip, not the email. Each gesture's dominant
+/// axis is latched when it begins — vertical (and diagonal-but-mostly-
+/// vertical) scrolling stays in the message, horizontal is handed up the
+/// responder chain to the enclosing horizontal scroller, momentum included.
+final class PanThroughWebView: WKWebView {
+    private var panningStrip = false
+
+    override func scrollWheel(with event: NSEvent) {
+        if event.phase == .began {
+            panningStrip = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        } else if event.phase == [] && event.momentumPhase == [] {
+            // A legacy wheel has no gesture to latch; route per event.
+            panningStrip = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        }
+        if panningStrip {
+            nextResponder?.scrollWheel(with: event)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
+}
+
 struct MessageWebView: NSViewRepresentable {
     let html: String
     var onAttachment: ((String, String) -> Void)?
@@ -785,7 +808,7 @@ struct MessageWebView: NSViewRepresentable {
         // Parent page JS sizes the message iframes; email content itself
         // stays script-free (iframe sandbox has no allow-scripts).
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = PanThroughWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
@@ -825,7 +848,7 @@ struct MessageWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.userContentController.add(context.coordinator, name: "sdhOpen")
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = PanThroughWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.isOpaque = false
