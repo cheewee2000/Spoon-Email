@@ -974,10 +974,8 @@ final class AppModel: ObservableObject {
             do {
                 switch try await Unsubscriber.perform(session.links) {
                 case .oneClickDone:
-                    await syncEngine.archive(accountId: session.thread.accountId,
-                                             threadId: session.thread.id)
-                    setUnsubscribeStage(.done("Unsubscribed from \(session.sender). Conversation archived."),
-                                        for: session.id)
+                    archiveAfterUnsubscribe(session,
+                                            flashText: "Unsubscribed from \(session.sender). Conversation archived.")
                 case .openedBrowser(let url):
                     #if os(macOS)
                     NSWorkspace.shared.open(url)
@@ -992,10 +990,8 @@ final class AppModel: ObservableObject {
                         subject: subject, bodyText: "unsubscribe",
                         sendAt: Date())
                     try await outbox.schedule(item)
-                    await syncEngine.archive(accountId: session.thread.accountId,
-                                             threadId: session.thread.id)
-                    setUnsubscribeStage(.done("Unsubscribe request emailed to \(to). Conversation archived."),
-                                        for: session.id)
+                    archiveAfterUnsubscribe(session,
+                                            flashText: "Unsubscribe request emailed to \(to). Conversation archived.")
                 }
             } catch {
                 setUnsubscribeStage(.failed(error.localizedDescription), for: session.id)
@@ -1006,11 +1002,31 @@ final class AppModel: ObservableObject {
     /// The web form can't report back, so the user confirms it finished.
     func finishUnsubscribeFromBrowser() {
         guard let session = unsubscribe else { return }
-        Task {
-            await syncEngine.archive(accountId: session.thread.accountId,
-                                     threadId: session.thread.id)
-            setUnsubscribeStage(.done("Conversation archived."), for: session.id)
+        archiveAfterUnsubscribe(session, flashText: "Conversation archived.")
+    }
+
+    /// A landed unsubscribe archives the way the `e` key does: the row leaves
+    /// the list, the reader advances to the neighboring email, and the sheet
+    /// closes with a flash instead of waiting on a "Done" click.
+    private func archiveAfterUnsubscribe(_ session: UnsubscribeSession, flashText: String) {
+        let thread = session.thread
+        let threads = activeList?.threads ?? []
+        let wasSelected = selectedThread?.key == thread.key
+        let idx = threads.firstIndex { $0.key == thread.key }
+        archive(thread)
+        if wasSelected, let idx {
+            if idx + 1 < threads.count {
+                readerSlideForward = true
+                withAnimation(CWT.nav) { selectedThread = threads[idx + 1] }
+            } else if idx > 0 {
+                readerSlideForward = false
+                withAnimation(CWT.nav) { selectedThread = threads[idx - 1] }
+            } else {
+                withAnimation(CWT.nav) { selectedThread = nil }
+            }
         }
+        unsubscribe = nil
+        flash(flashText)
     }
 
     func dismissUnsubscribe() {
