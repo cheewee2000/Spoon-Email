@@ -610,6 +610,19 @@ final class AppModel: ObservableObject {
         navigate(to: destination)
     }
 
+    /// Warm the reader's page cache for the threads next to `thread` in the
+    /// active list, so e / j / k land on an already-rendered page.
+    func prefetchNeighbors(of thread: MailThread) {
+        let threads = activeList?.threads ?? []
+        guard let idx = threads.firstIndex(where: { $0.key == thread.key }) else { return }
+        for offset in [1, -1, 2] {
+            let i = idx + offset
+            if threads.indices.contains(i) {
+                ThreadDetailModel.prefetch(db: db, thread: threads[i])
+            }
+        }
+    }
+
     /// Archive the selection and advance to the next thread (Superhuman "e").
     func archiveSelected(in threads: [MailThread]) {
         guard let sel = selectedThread else { return }

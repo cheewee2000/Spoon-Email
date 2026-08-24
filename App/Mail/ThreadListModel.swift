@@ -225,16 +225,86 @@ final class ThreadDetailModel: ObservableObject {
     private var avatarTask: Task<Void, Never>?
     private var threadKey = ""
 
+    // MARK: Rendered-page cache
+
+    /// Pages for threads recently shown or about to be (the selection's
+    /// neighbors, prefetched) — so archive-and-advance paints the next email
+    /// immediately instead of waiting out a fetch and a megabyte-scale
+    /// render. A prefetched page may lack inline images and avatars; the
+    /// live observation fills those in once the thread is actually shown.
+    private static var pageCache: [String: String] = [:]
+    private static var pageOrder: [String] = []
+    private static var prefetching: Set<String> = []
+
+    static func cachedPage(for key: String) -> String? { pageCache[key] }
+
+    static func cachePage(_ html: String, for key: String) {
+        guard !html.isEmpty else { return }
+        pageCache[key] = html
+        pageOrder.removeAll { $0 == key }
+        pageOrder.append(key)
+        if pageOrder.count > 16 { pageCache.removeValue(forKey: pageOrder.removeFirst()) }
+    }
+
+    /// Fetch and render `thread`'s page into the cache, off the main thread.
+    static func prefetch(db: AppDatabase, thread: MailThread) {
+        let key = thread.key
+        guard pageCache[key] == nil, !prefetching.contains(key) else { return }
+        prefetching.insert(key)
+        let accountId = thread.accountId
+        let threadId = thread.id
+        Task.detached(priority: .utility) {
+            let page = try? await db.writer.read { db -> String in
+                let messages = try Message.fetchAll(
+                    db,
+                    sql: "SELECT * FROM message WHERE accountId = ? AND threadId = ? ORDER BY date",
+                    arguments: [accountId, threadId])
+                let attachments = try Attachment.fetchAll(
+                    db,
+                    sql: """
+                    SELECT a.* FROM attachment a
+                    JOIN message m ON m.accountId = a.accountId AND m.id = a.messageId
+                    WHERE m.accountId = ? AND m.threadId = ?
+                    """,
+                    arguments: [accountId, threadId])
+                return ThreadHTML.render(messages: messages,
+                                         attachments: Dictionary(grouping: attachments, by: \.messageId))
+            }
+            await MainActor.run {
+                prefetching.remove(key)
+                if let page { cachePage(page, for: key) }
+            }
+        }
+    }
+
+    /// Install a freshly built page — into the cache always, on screen only
+    /// if the reader is still on that thread.
+    private func publish(_ html: String, for key: String) {
+        Self.cachePage(html, for: key)
+        if threadKey == key { self.html = html }
+    }
+
+    /// The page for `key`, never another thread's: in the body pass before
+    /// `observe` has retargeted this model, the cache answers (or blank)
+    /// rather than the outgoing thread's html.
+    func page(for key: String) -> String {
+        threadKey == key ? html : (Self.cachedPage(for: key) ?? "")
+    }
+
     func observe(db: AppDatabase, accounts: AccountStore, thread: MailThread) {
         cancellable?.cancel()
         let accountId = thread.accountId
         let threadId = thread.id
+        let key = thread.key
         if threadKey != thread.key {
             threadKey = thread.key
             inlineTask?.cancel()
             inlineImages.clear()
             avatarTask?.cancel()
             avatars.clear()
+            messages = []
+            attachments = [:]
+            html = Self.cachedPage(for: thread.key) ?? ""
         }
         let client = accounts.client(for: accountId)
         let inlineImages = self.inlineImages
@@ -271,17 +341,19 @@ final class ThreadDetailModel: ObservableObject {
         ) { error in
             print("message observation error: \(error)")
         } onChange: { [weak self] (messages, attachments, html, generation) in
-            guard let self else { return }
+            guard let self, self.threadKey == key else { return }
             self.messages = messages
             self.attachments = attachments
             self.html = html
-            self.fetchInlineImages(messages: messages, attachments: attachments, client: client)
-            self.fetchAvatars(messages: messages, attachments: attachments)
+            Self.cachePage(html, for: key)
+            self.fetchInlineImages(messages: messages, attachments: attachments, client: client, key: key)
+            self.fetchAvatars(messages: messages, attachments: attachments, key: key)
             if generation != inlineImages.version + avatars.version {
                 // Rendered from maps that have since moved on — rebuild.
                 Task { [weak self] in
                     guard let self else { return }
-                    self.html = await self.rerender(messages: messages, attachments: attachments)
+                    self.publish(await self.rerender(messages: messages, attachments: attachments),
+                                 for: key)
                 }
             }
         }
@@ -290,7 +362,8 @@ final class ThreadDetailModel: ObservableObject {
     /// Looks up a picture for each distinct sender in the thread and re-renders
     /// once any of them land. Senders already resolved (or already known to
     /// have none) cost nothing — the store answers those from its cache.
-    private func fetchAvatars(messages: [Message], attachments: [String: [Attachment]]) {
+    private func fetchAvatars(messages: [Message], attachments: [String: [Attachment]],
+                              key: String) {
         let wanted = Set(messages.map { $0.fromEmail.lowercased() })
             .filter { !$0.isEmpty && !avatars.has($0) }
         guard !wanted.isEmpty else { return }
@@ -310,7 +383,8 @@ final class ThreadDetailModel: ObservableObject {
                 landed = true
             }
             guard landed, !Task.isCancelled, let self else { return }
-            self.html = await self.rerender(messages: messages, attachments: attachments)
+            self.publish(await self.rerender(messages: messages, attachments: attachments),
+                         for: key)
         }
     }
 
@@ -331,7 +405,8 @@ final class ThreadDetailModel: ObservableObject {
     /// images are holes in the message.
     private func fetchInlineImages(messages: [Message],
                                    attachments: [String: [Attachment]],
-                                   client: GmailClient) {
+                                   client: GmailClient,
+                                   key: String) {
         var wanted: [String: [Attachment]] = [:]
         for m in messages {
             let cited = ThreadHTML.citedIds(in: m.bodyHTML ?? "")
@@ -364,7 +439,7 @@ final class ThreadDetailModel: ObservableObject {
             guard landed, !Task.isCancelled, let self else { return }
             let html = await self.rerender(messages: messages, attachments: attachments)
             guard !Task.isCancelled else { return }
-            self.html = html
+            self.publish(html, for: key)
         }
     }
 }

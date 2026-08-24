@@ -52,12 +52,14 @@ struct ThreadDetailView: View {
         .clipped()
             .onAppear {
                 detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
+                model.prefetchNeighbors(of: thread)
                 if thread.isUnread {
                     model.markRead(thread, read: true, recordUndo: false)
                 }
             }
             .onChange(of: thread.key) {
                 detail.observe(db: model.db, accounts: model.accountStore, thread: thread)
+                model.prefetchNeighbors(of: thread)
                 if thread.isUnread {
                     model.markRead(thread, read: true, recordUndo: false)
                 }
@@ -149,7 +151,7 @@ struct ThreadDetailView: View {
             .background(CWT.paper)
             Hairline()
             MessageWebView(
-                html: detail.html,
+                html: detail.page(for: thread.key),
                 onAttachment: { messageId, partId in
                     if let att = detail.attachments[messageId]?.first(where: { $0.partId == partId }) {
                         model.download(att)
