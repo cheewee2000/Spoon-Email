@@ -252,13 +252,14 @@ struct RootView: View {
         default:
             break
         }
-        // The row under the pointer beats the list selection as the target,
-        // so hover-then-keystroke triages without a click — including on the
-        // board, whose columns have no selection of their own.
-        let hovered = model.hoveredThread
+        // With the reader up, the open email owns the keys. Otherwise the
+        // row under the pointer is the target, so hover-then-keystroke
+        // triages without a click — including on the board, whose columns
+        // have no selection of their own.
+        let hovered = model.selectedThread == nil ? model.hoveredThread : nil
         guard model.mailbox != nil || hovered != nil else { return false }
         let threads = model.activeList?.threads ?? []
-        let target = hovered ?? model.selectedThread
+        let target = model.selectedThread ?? hovered
         switch event.charactersIgnoringModifiers {
         case "j": guard model.mailbox != nil else { return false }
                   model.selectNext(in: threads)
