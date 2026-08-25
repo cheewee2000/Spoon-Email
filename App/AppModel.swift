@@ -1011,22 +1011,27 @@ final class AppModel: ObservableObject {
     private func archiveAfterUnsubscribe(_ session: UnsubscribeSession, flashText: String) {
         let thread = session.thread
         let threads = activeList?.threads ?? []
-        let wasSelected = selectedThread?.key == thread.key
-        let idx = threads.firstIndex { $0.key == thread.key }
         archive(thread)
-        if wasSelected, let idx {
-            if idx + 1 < threads.count {
-                readerSlideForward = true
-                withAnimation(CWT.nav) { selectedThread = threads[idx + 1] }
-            } else if idx > 0 {
-                readerSlideForward = false
-                withAnimation(CWT.nav) { selectedThread = threads[idx - 1] }
-            } else {
-                withAnimation(CWT.nav) { selectedThread = nil }
-            }
-        }
+        advanceReader(past: thread, in: threads)
         unsubscribe = nil
         flash(flashText)
+    }
+
+    /// Slides the reader to the neighbor of a thread that just left the list.
+    /// `threads` is the list as it stood before the row left, so the neighbor
+    /// math still has the old order.
+    private func advanceReader(past thread: MailThread, in threads: [MailThread]) {
+        guard selectedThread?.key == thread.key,
+              let idx = threads.firstIndex(where: { $0.key == thread.key }) else { return }
+        if idx + 1 < threads.count {
+            readerSlideForward = true
+            withAnimation(CWT.nav) { selectedThread = threads[idx + 1] }
+        } else if idx > 0 {
+            readerSlideForward = false
+            withAnimation(CWT.nav) { selectedThread = threads[idx - 1] }
+        } else {
+            withAnimation(CWT.nav) { selectedThread = nil }
+        }
     }
 
     func dismissUnsubscribe() {
@@ -1041,14 +1046,23 @@ final class AppModel: ObservableObject {
     }
 
     func block(_ thread: MailThread, wholeDomain: Bool) {
+        let threads = activeList?.threads ?? []
         Task {
             guard let m = lastMessage(in: thread) else { return }
             let email = m.fromEmail.lowercased()
             let pattern = wholeDomain ? String(email.split(separator: "@").last ?? "") : email
             guard !pattern.isEmpty else { return }
             do {
-                let (rule, archived) = try await syncEngine.addBlock(
+                let (rule, swept) = try await syncEngine.addBlock(
                     pattern: pattern, kind: wholeDomain ? "domain" : "email")
+                // The sweep only reaches inbox threads; a thread blocked from
+                // some other view still archives so blocking always clears it.
+                var archived = swept
+                let ref = ThreadRef(accountId: thread.accountId, threadId: thread.id)
+                if !archived.contains(ref) {
+                    await syncEngine.archive(accountId: thread.accountId, threadId: thread.id)
+                    archived.append(ref)
+                }
                 // Undo drops the rule *and* returns everything it swept out.
                 pushUndo("Block \(pattern)") { [weak self] in
                     guard let self else { return }
@@ -1061,6 +1075,8 @@ final class AppModel: ObservableObject {
                         }
                     }
                 }
+                ThreadListModel.hideEverywhere(thread.key)
+                advanceReader(past: thread, in: threads)
                 flash("Blocked \(pattern) — matching mail auto-archives")
             } catch {
                 lastError = error.localizedDescription
