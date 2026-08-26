@@ -919,7 +919,8 @@ struct MessageWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.userContentController.add(context.coordinator, name: "sdhOpen")
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        let view = PanThroughWebView(frame: .zero, configuration: config)
+        // Plain WKWebView: PanThroughWebView is macOS-only (trackpad routing).
+        let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.isOpaque = false

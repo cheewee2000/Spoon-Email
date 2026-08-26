@@ -1131,6 +1131,7 @@ final class AppModel: ObservableObject {
                 let client = accountStore.client(for: attachment.accountId)
                 let data = try await client.downloadAttachment(
                     messageId: attachment.messageId, partId: attachment.partId)
+                #if os(macOS)
                 let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
                 var url = downloads.appendingPathComponent(attachment.filename)
                 var n = 1
@@ -1142,14 +1143,48 @@ final class AppModel: ObservableObject {
                 }
                 try data.write(to: url)
                 flash("Saved \(url.lastPathComponent) to Downloads")
-                #if os(macOS)
                 NSWorkspace.shared.activateFileViewerSelecting([url])
+                #else
+                // The sandbox has no user-visible Downloads folder — the old
+                // write threw and, had it landed, nothing could browse to it.
+                // Stage under a unique temp dir (keeps the real filename) and
+                // hand the file to the share sheet: Save to Files, AirDrop,
+                // open in another app.
+                let dir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("attachment-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let url = dir.appendingPathComponent(attachment.filename)
+                try data.write(to: url)
+                syncStatus = nil
+                share(url: url)
                 #endif
             } catch {
                 lastError = "Download failed: \(error.localizedDescription)"
             }
         }
     }
+
+    #if os(iOS)
+    /// Presents the system share sheet on whatever is frontmost — the reader,
+    /// or a sheet above it.
+    private func share(url: URL) {
+        guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+              let root = scene.keyWindow?.rootViewController else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        // iPad requires an anchor for its popover
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = top.view
+            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY,
+                                    width: 1, height: 1)
+            pop.permittedArrowDirections = []
+        }
+        top.present(sheet, animated: true)
+    }
+    #endif
 
     /// Transient status-bar message.
     private func flash(_ text: String) {
