@@ -918,7 +918,35 @@ final class AppModel: ObservableObject {
 
     // MARK: - Send / undo send / send later
 
+    /// Every address the user sends to becomes an autocomplete candidate,
+    /// so a first-time recipient completes on the next compose. Runs at
+    /// schedule time — an undone send still recorded deliberate typing. A
+    /// bare typed address carries no display name, so an existing name is
+    /// kept rather than clobbered with the address's local part.
+    private func rememberRecipients(_ draft: ComposeDraft) {
+        let now = Date()
+        let raws = [draft.to, draft.cc, draft.bcc]
+            .flatMap { $0.components(separatedBy: ",") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        Task {
+            try? await db.writer.write { db in
+                for raw in raws {
+                    let (name, email) = MimeParser.parseAddress(raw)
+                    guard email.contains("@") else { continue }
+                    try db.execute(sql: """
+                        INSERT INTO contact (email, name, lastSeen) VALUES (?, ?, ?)
+                        ON CONFLICT(email) DO UPDATE SET
+                            name = CASE WHEN ? THEN excluded.name ELSE contact.name END,
+                            lastSeen = MAX(contact.lastSeen, excluded.lastSeen)
+                        """,
+                        arguments: [email.lowercased(), name, now, raw.contains("<")])
+                }
+            }
+        }
+    }
+
     func send(draft: ComposeDraft, at date: Date?) {
+        rememberRecipients(draft)
         let sendAt = date ?? Date().addingTimeInterval(Self.undoWindow)
         let item = OutboxItem(
             accountId: draft.accountId, threadId: draft.threadId,
