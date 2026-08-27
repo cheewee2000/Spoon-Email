@@ -17,6 +17,10 @@ struct RootView: View {
     @FocusState private var searchFocused: Bool
     #if os(macOS)
     @State private var keyMonitor: Any?
+    #else
+    /// The phone opens on the mail itself (the pager lands on Unified);
+    /// the rail stays one back-swipe away.
+    @State private var compactColumn = NavigationSplitViewColumn.detail
     #endif
 
     var body: some View {
@@ -33,7 +37,7 @@ struct RootView: View {
             #else
             // No board on the phone — nine columns don't fit. One mailbox at a
             // time, swiped between, with the rail still a swipe further left.
-            NavigationSplitView {
+            NavigationSplitView(preferredCompactColumn: $compactColumn) {
                 sidebar
             } detail: {
                 // The stack is what arms the pager's NavigationLinks — in a
