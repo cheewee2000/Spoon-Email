@@ -10,7 +10,7 @@ packages:
     path: MailCore
 settings:
   base:
-    MARKETING_VERSION: 0.43.0
+    MARKETING_VERSION: 0.44.0
     CURRENT_PROJECT_VERSION: 1
     # Swift 5 language mode: GRDB 6 ValueObservation closures crash under
     # Swift 6 dynamic actor-isolation checking (they run on DB queues).
@@ -25,6 +25,8 @@ targets:
           - Info.plist
           - Spoon-iOS.entitlements
       - path: Shared
+      - path: AppIcon.icon
+        buildPhase: resources
     dependencies:
       - package: MailCore
       - target: SpoonWidgets
