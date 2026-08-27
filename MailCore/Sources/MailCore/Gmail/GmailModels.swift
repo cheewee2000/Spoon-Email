@@ -93,8 +93,8 @@ public enum MimeParser {
             guard let p else { return }
             let mime = p.mimeType ?? ""
             let isAttachment = !(p.filename ?? "").isEmpty
-            if !isAttachment, let data = p.body?.data, let decoded = base64URLDecode(data),
-               let str = String(data: decoded, encoding: .utf8) ?? String(data: decoded, encoding: .isoLatin1) {
+            if !isAttachment, let data = p.body?.data, let decoded = base64URLDecode(data) {
+                let str = decodeBody(decoded, contentType: header(p, "Content-Type"))
                 if mime == "text/html", html == nil { html = str }
                 if mime == "text/plain", text == nil { text = str }
             }
@@ -102,6 +102,31 @@ public enum MimeParser {
         }
         walk(part)
         return (html, text)
+    }
+
+    /// Body bytes → String, honoring the part's declared charset. A UTF-8
+    /// body carrying a handful of corrupt bytes used to fail the strict
+    /// decode and fall back to Latin-1 wholesale, which mojibaked every
+    /// emoji and accent in the message ("⚠️" → "âš ï¸"). Now only the bad
+    /// bytes are lost. The Latin-1 path survives for bodies that are
+    /// actually legacy-encoded: declared, or undeclared but so far from
+    /// valid UTF-8 that replacement characters would litter the text.
+    static func decodeBody(_ data: Data, contentType: String) -> String {
+        let ct = contentType.lowercased()
+        if ct.contains("windows-1252") || ct.contains("cp1252") {
+            return String(data: data, encoding: .windowsCP1252) ?? String(decoding: data, as: UTF8.self)
+        }
+        if ct.contains("iso-8859-1") || ct.contains("latin1") {
+            return String(data: data, encoding: .isoLatin1) ?? String(decoding: data, as: UTF8.self)
+        }
+        if let strict = String(data: data, encoding: .utf8) { return strict }
+        let lossy = String(decoding: data, as: UTF8.self)   // U+FFFD per bad byte
+        let bad = lossy.unicodeScalars.lazy.filter { $0.value == 0xFFFD }.count
+        if bad > 8, bad * 100 > lossy.unicodeScalars.count, // frequent AND numerous: not UTF-8 at all
+           let latin = String(data: data, encoding: .isoLatin1) {
+            return latin
+        }
+        return lossy
     }
 
     /// "Ann Example <ann@example.com>" → ("Ann Example", "ann@example.com")
