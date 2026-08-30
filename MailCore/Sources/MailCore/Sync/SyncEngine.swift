@@ -29,6 +29,14 @@ public actor SyncEngine {
     private var syncingAccounts: Set<String> = []
     private var backfillingAccounts: Set<String> = []
 
+    /// Label ops the user applied in the last minute, keyed by thread. The
+    /// queued `pending_op` rows cover a sync racing an un-replayed change,
+    /// but a `threads.get` response can be fetched before an op lands on the
+    /// server and stored after the op has replayed and left the queue — so
+    /// `store` re-applies these on top of whatever labels the server sent.
+    private var recentLocalDeltas: [ThreadRef: [(add: [String], remove: [String], at: Date)]] = [:]
+    private static let localDeltaTTL: TimeInterval = 60
+
     /// UI status line ("Syncing 3 accounts…"); nil when idle.
     public var statusHandler: (@Sendable (String?) -> Void)?
     public func setStatusHandler(_ h: @Sendable @escaping (String?) -> Void) { statusHandler = h }
@@ -490,7 +498,55 @@ public actor SyncEngine {
         let liveIds: [String] = messages.map(\.id)
         let placeholders = Self.questionMarks(count: liveIds.count)
 
-        try await db.writer.write { [labelSet, messages, attachments, liveIds, placeholders] db in
+        // Local changes beat the server snapshot. A fetch that raced an
+        // archive — op still queued, or already replayed while this response
+        // was in flight — hands back labels from before it, and storing those
+        // verbatim puts the thread back in the inbox until a later pass
+        // happens to notice. Re-apply what the user did on top.
+        let ref = ThreadRef(accountId: accountId, threadId: gThread.id)
+        let localDeltas: [(add: [String], remove: [String])] =
+            (recentLocalDeltas[ref] ?? [])
+                .filter { Date().timeIntervalSince($0.at) < Self.localDeltaTTL }
+                .map { (add: $0.add, remove: $0.remove) }
+
+        try await db.writer.write { [labelSet, messages, attachments, liveIds, placeholders, localDeltas, openId] db in
+            // Queued ops are read inside the transaction, so one committing
+            // between the earlier reads and this write still counts.
+            let pending = try PendingOp
+                .filter(Column("accountId") == accountId && Column("threadId") == gThread.id)
+                .order(Column("id"))
+                .fetchAll(db)
+            var deltas: [(add: [String], remove: [String])] = pending.map {
+                (add: $0.addLabelIds.isEmpty ? [] : $0.addLabelIds.components(separatedBy: ","),
+                 remove: $0.removeLabelIds.isEmpty ? [] : $0.removeLabelIds.components(separatedBy: ","))
+            }
+            // The in-memory record holds the full recent sequence in order,
+            // replayed ops included, so it applies last; re-applying an op
+            // that's also still queued is harmless — deltas are set ops.
+            deltas += localDeltas
+            var finalLabels = labelSet
+            var touchedUnread = false
+            for d in deltas {
+                finalLabels.formUnion(d.add)
+                finalLabels.subtract(d.remove)
+                if d.add.contains(GmailLabels.unread) || d.remove.contains(GmailLabels.unread) {
+                    touchedUnread = true
+                }
+            }
+            var thread = thread
+            var messages = messages
+            if touchedUnread {
+                // Mirror modifyThread: a local read/unread flip covers every
+                // message in the thread.
+                let unread = finalLabels.contains(GmailLabels.unread)
+                for i in messages.indices { messages[i].isUnread = unread }
+                thread.isUnread = unread
+            }
+            if finalLabels != labelSet {
+                thread.isStarred = finalLabels.contains(GmailLabels.starred)
+                thread.category = ThreadCategory.derive(from: finalLabels)
+                thread.isOpen = openId.map { finalLabels.contains($0) } ?? false
+            }
             try thread.save(db)
             try db.execute(sql: "UPDATE thread SET syncSig = ? WHERE accountId = ? AND id = ?",
                            arguments: [signature, accountId, gThread.id])
@@ -523,7 +579,7 @@ public actor SyncEngine {
                 arguments: StatementArguments([accountId, gThread.id] + liveIds))
             try db.execute(sql: "DELETE FROM thread_label WHERE accountId = ? AND threadId = ?",
                            arguments: [accountId, gThread.id])
-            for label in labelSet {
+            for label in finalLabels {
                 try ThreadLabel(accountId: accountId, threadId: gThread.id, labelId: label).save(db)
             }
             for m in messages {
@@ -752,6 +808,14 @@ public actor SyncEngine {
             var op = PendingOp(accountId: accountId, threadId: threadId,
                                addLabelIds: add, removeLabelIds: remove)
             try op.insert(db)
+        }
+        let ref = ThreadRef(accountId: accountId, threadId: threadId)
+        recentLocalDeltas[ref, default: []].append((add: add, remove: remove, at: Date()))
+        let cutoff = Date().addingTimeInterval(-Self.localDeltaTTL)
+        for (key, list) in recentLocalDeltas {
+            let kept = list.filter { $0.at > cutoff }
+            if kept.isEmpty { recentLocalDeltas.removeValue(forKey: key) }
+            else if kept.count != list.count { recentLocalDeltas[key] = kept }
         }
         try? await replayPendingOps(accountId: accountId)
     }

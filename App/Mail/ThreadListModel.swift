@@ -253,7 +253,10 @@ final class ThreadDetailModel: ObservableObject {
         prefetching.insert(key)
         let accountId = thread.accountId
         let threadId = thread.id
-        Task.detached(priority: .utility) {
+        // The reader is usually one keystroke from needing this page —
+        // utility priority let a heavy render lose the race with an
+        // archive-and-advance and hand the reader a blank pane.
+        Task.detached(priority: .userInitiated) {
             let page = try? await db.writer.read { db -> String in
                 let messages = try Message.fetchAll(
                     db,

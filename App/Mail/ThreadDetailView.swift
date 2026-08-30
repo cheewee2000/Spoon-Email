@@ -871,8 +871,14 @@ struct MessageWebView: NSViewRepresentable {
     var onPullNext: (() -> Void)?
     var onPullPrevious: (() -> Void)?
 
+    /// One pool for every message view. Each thread advance builds a fresh
+    /// web view, and a fresh default configuration gets a fresh pool — which
+    /// spawns a whole new WebContent process before the next email can paint.
+    private static let processPool = WKProcessPool()
+
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        config.processPool = Self.processPool
         config.userContentController.add(context.coordinator, name: "sdhOpen")
         config.userContentController.add(context.coordinator, name: "sdhScroll")
         config.userContentController.add(context.coordinator, name: "sdhHScroll")
@@ -915,8 +921,13 @@ struct MessageWebView: UIViewRepresentable {
     var onPullNext: (() -> Void)?
     var onPullPrevious: (() -> Void)?
 
+    /// Same arrangement as the Mac side: share one pool so advancing to the
+    /// next email reuses a warm WebContent process instead of spawning one.
+    private static let processPool = WKProcessPool()
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        config.processPool = Self.processPool
         config.userContentController.add(context.coordinator, name: "sdhOpen")
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         // Plain WKWebView: PanThroughWebView is macOS-only (trackpad routing).
