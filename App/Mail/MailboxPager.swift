@@ -46,7 +46,12 @@ struct MailboxPager: View {
                 Hairline()
                 page
             } else {
-                ThreadPageList(list: searchList, emptyText: "No matches") { readerList = $0 }
+                ThreadPageList(list: searchList, emptyText: "No matches") {
+                    readerList = $0
+                    // The reader's neighbor prefetch reads `activeList`; without
+                    // this it's Mac-only and every advance renders from scratch.
+                    model.activeList = $0
+                }
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -159,7 +164,10 @@ struct MailboxPager: View {
 
     private var page: some View {
         ZStack {
-            MailboxPage(item: current) { readerList = $0 }
+            MailboxPage(item: current) {
+                readerList = $0
+                model.activeList = $0
+            }
                 .id(current)
                 .transition(.asymmetric(
                     insertion: .move(edge: forward ? .trailing : .leading),
@@ -232,7 +240,10 @@ private struct ThreadReader: View {
         ThreadDetailView(thread: current,
                          onArchive: {
                              let leaving = current
-                             advance(orDismiss: true)
+                             // Slide to the next thread like the pull does —
+                             // the motion also covers the page's load time.
+                             model.readerSlideForward = true
+                             withAnimation(CWT.nav) { advance(orDismiss: true) }
                              model.archive(leaving)
                          },
                          nextThread: next,
