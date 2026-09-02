@@ -234,7 +234,9 @@ final class ThreadDetailModel: ObservableObject {
     /// live observation fills those in once the thread is actually shown.
     private static var pageCache: [String: String] = [:]
     private static var pageOrder: [String] = []
-    private static var prefetching: Set<String> = []
+    /// Key → whether a preloaded web view was asked for. A dictionary rather
+    /// than a set so a later warmView request can upgrade an in-flight fetch.
+    private static var prefetching: [String: Bool] = [:]
 
     static func cachedPage(for key: String) -> String? { pageCache[key] }
 
@@ -247,10 +249,20 @@ final class ThreadDetailModel: ObservableObject {
     }
 
     /// Fetch and render `thread`'s page into the cache, off the main thread.
-    static func prefetch(db: AppDatabase, thread: MailThread) {
+    /// `warmView` also loads the page into an offscreen web view, so the
+    /// reader can adopt it fully painted — reserved for the immediate
+    /// neighbors (the ±2 pages stay HTML-only).
+    static func prefetch(db: AppDatabase, thread: MailThread, warmView: Bool = false) {
         let key = thread.key
-        guard pageCache[key] == nil, !prefetching.contains(key) else { return }
-        prefetching.insert(key)
+        if let page = pageCache[key] {
+            if warmView { WebViewPreloader.shared.preload(key: key, html: page) }
+            return
+        }
+        if let inFlight = prefetching[key] {
+            prefetching[key] = inFlight || warmView
+            return
+        }
+        prefetching[key] = warmView
         let accountId = thread.accountId
         let threadId = thread.id
         // The reader is usually one keystroke from needing this page —
@@ -274,8 +286,11 @@ final class ThreadDetailModel: ObservableObject {
                                          attachments: Dictionary(grouping: attachments, by: \.messageId))
             }
             await MainActor.run {
-                prefetching.remove(key)
-                if let page { cachePage(page, for: key) }
+                let wantsView = prefetching.removeValue(forKey: key) ?? false
+                if let page {
+                    cachePage(page, for: key)
+                    if wantsView { WebViewPreloader.shared.preload(key: key, html: page) }
+                }
             }
         }
     }

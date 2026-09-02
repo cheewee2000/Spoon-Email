@@ -152,6 +152,7 @@ struct ThreadDetailView: View {
             Hairline()
             MessageWebView(
                 html: detail.page(for: thread.key),
+                threadKey: thread.key,
                 onAttachment: { messageId, partId in
                     if let att = detail.attachments[messageId]?.first(where: { $0.partId == partId }) {
                         model.download(att)
@@ -824,6 +825,59 @@ enum ThreadHTML {
     }
 }
 
+// MARK: - Preloaded reader pages
+
+/// Rendered-and-painted web views for the threads the reader is about to
+/// show (the selection's neighbors). The HTML page cache made the *content*
+/// instant, but every advance still built a fresh WKWebView and made it
+/// parse and lay out a megabyte-scale page before anything painted — that
+/// parse is the pause after an archive. Loading the neighbors into offscreen
+/// web views while the current email is read lets an advance adopt a view
+/// that has already done all of it.
+@MainActor
+final class WebViewPreloader {
+    static let shared = WebViewPreloader()
+
+    struct Entry {
+        let view: ReaderWebView
+        let coordinator: WebCoordinator
+        let html: String
+    }
+
+    private var entries: [String: Entry] = [:]
+    private var order: [String] = []
+    /// The reader pane's current size, so a preloaded page lays out at the
+    /// width it will actually be shown at (kept fresh by the live view).
+    var readerSize = CGSize(width: 800, height: 1000)
+
+    func preload(key: String, html: String) {
+        guard !html.isEmpty, entries[key]?.html != html else { return }
+        // A re-render landed since this key was preloaded: reload in place.
+        if let stale = entries[key] {
+            stale.coordinator.load(html, into: stale.view)
+            entries[key] = Entry(view: stale.view, coordinator: stale.coordinator, html: html)
+            return
+        }
+        let coordinator = WebCoordinator()
+        let view = MessageWebView.makeWebView(coordinator: coordinator)
+        view.frame = CGRect(origin: .zero, size: readerSize)
+        coordinator.load(html, into: view)
+        entries[key] = Entry(view: view, coordinator: coordinator, html: html)
+        order.removeAll { $0 == key }
+        order.append(key)
+        while order.count > 3 {
+            entries.removeValue(forKey: order.removeFirst())
+        }
+    }
+
+    /// Hands the preloaded view over to the reader (it leaves the pool: the
+    /// on-screen view's lifecycle belongs to SwiftUI now).
+    func take(key: String) -> Entry? {
+        order.removeAll { $0 == key }
+        return entries.removeValue(forKey: key)
+    }
+}
+
 // MARK: - WKWebView wrapper (email JS sandboxed, links open externally)
 
 #if os(macOS)
@@ -836,6 +890,11 @@ enum ThreadHTML {
 /// goes up the responder chain to the enclosing horizontal scroller,
 /// momentum included.
 final class PanThroughWebView: WKWebView {
+    /// The coordinator this view was built around. A preloaded view arrives
+    /// with its own — the script-message handlers in its configuration point
+    /// there — so the representable that adopts it must keep talking to that
+    /// coordinator, not the one SwiftUI made for the adoption.
+    var owner: WebCoordinator?
     /// Whether the page reports horizontal room of its own, per direction
     /// (kept current by the page's sdhHScroll messages).
     var contentCanPanLeft = false
@@ -859,8 +918,12 @@ final class PanThroughWebView: WKWebView {
     }
 }
 
+typealias ReaderWebView = PanThroughWebView
+
 struct MessageWebView: NSViewRepresentable {
     let html: String
+    /// Which thread this page is, so makeNSView can adopt a preloaded view.
+    let threadKey: String
     var onAttachment: ((String, String) -> Void)?
     var onEditDraft: ((String) -> Void)?
     var onDeleteDraft: ((String) -> Void)?
@@ -876,42 +939,67 @@ struct MessageWebView: NSViewRepresentable {
     /// spawns a whole new WebContent process before the next email can paint.
     private static let processPool = WKProcessPool()
 
-    func makeNSView(context: Context) -> WKWebView {
+    static func makeWebView(coordinator: WebCoordinator) -> ReaderWebView {
         let config = WKWebViewConfiguration()
-        config.processPool = Self.processPool
-        config.userContentController.add(context.coordinator, name: "sdhOpen")
-        config.userContentController.add(context.coordinator, name: "sdhScroll")
-        config.userContentController.add(context.coordinator, name: "sdhHScroll")
+        config.processPool = processPool
+        config.userContentController.add(coordinator, name: "sdhOpen")
+        config.userContentController.add(coordinator, name: "sdhScroll")
+        config.userContentController.add(coordinator, name: "sdhHScroll")
         // Parent page JS sizes the message iframes; email content itself
         // stays script-free (iframe sandbox has no allow-scripts).
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         let view = PanThroughWebView(frame: .zero, configuration: config)
-        view.navigationDelegate = context.coordinator
-        view.uiDelegate = context.coordinator
+        view.owner = coordinator
+        view.navigationDelegate = coordinator
+        view.uiDelegate = coordinator
         view.setValue(false, forKey: "drawsBackground")
-        context.coordinator.watchPull(on: view)
+        coordinator.watchPull(on: view)
         return view
     }
 
+    func makeNSView(context: Context) -> WKWebView {
+        if let entry = WebViewPreloader.shared.take(key: threadKey) {
+            // Already parsed, laid out and painted offscreen. If the page
+            // re-rendered since the preload, load the fresh one — still no
+            // worse than starting cold.
+            if entry.html != html { entry.coordinator.load(html, into: entry.view) }
+            return entry.view
+        }
+        return Self.makeWebView(coordinator: context.coordinator)
+    }
+
     func updateNSView(_ view: WKWebView, context: Context) {
-        context.coordinator.onAttachment = onAttachment
-        context.coordinator.onEditDraft = onEditDraft
-        context.coordinator.onDeleteDraft = onDeleteDraft
-        context.coordinator.onMailto = onMailto
-        context.coordinator.onAction = onAction
-        context.coordinator.onPull = onPull
-        context.coordinator.onPullNext = onPullNext
-        context.coordinator.onPullPrevious = onPullPrevious
-        if context.coordinator.needsLoad(html) {
-            context.coordinator.load(html, into: view)
+        // An adopted preloaded view keeps its own coordinator (the one its
+        // message handlers point at); a view we made here uses SwiftUI's.
+        let coordinator = (view as? PanThroughWebView)?.owner ?? context.coordinator
+        if view.frame.width > 50 { WebViewPreloader.shared.readerSize = view.frame.size }
+        coordinator.onAttachment = onAttachment
+        coordinator.onEditDraft = onEditDraft
+        coordinator.onDeleteDraft = onDeleteDraft
+        coordinator.onMailto = onMailto
+        coordinator.onAction = onAction
+        coordinator.onPull = onPull
+        coordinator.onPullNext = onPullNext
+        coordinator.onPullPrevious = onPullPrevious
+        if coordinator.needsLoad(html) {
+            coordinator.load(html, into: view)
         }
     }
 
     func makeCoordinator() -> WebCoordinator { WebCoordinator() }
 }
 #else
+/// Same slot as the Mac's PanThroughWebView `owner`: the coordinator a
+/// preloaded view was built around, which the adopting representable must
+/// keep using (the view's script-message handlers point at it).
+final class ReaderWebView: WKWebView {
+    var owner: WebCoordinator?
+}
+
 struct MessageWebView: UIViewRepresentable {
     let html: String
+    /// Which thread this page is, so makeUIView can adopt a preloaded view.
+    let threadKey: String
     var onAttachment: ((String, String) -> Void)?
     var onEditDraft: ((String) -> Void)?
     var onDeleteDraft: ((String) -> Void)?
@@ -925,35 +1013,45 @@ struct MessageWebView: UIViewRepresentable {
     /// next email reuses a warm WebContent process instead of spawning one.
     private static let processPool = WKProcessPool()
 
-    func makeUIView(context: Context) -> WKWebView {
+    static func makeWebView(coordinator: WebCoordinator) -> ReaderWebView {
         let config = WKWebViewConfiguration()
-        config.processPool = Self.processPool
-        config.userContentController.add(context.coordinator, name: "sdhOpen")
+        config.processPool = processPool
+        config.userContentController.add(coordinator, name: "sdhOpen")
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // Plain WKWebView: PanThroughWebView is macOS-only (trackpad routing).
-        let view = WKWebView(frame: .zero, configuration: config)
-        view.navigationDelegate = context.coordinator
-        view.uiDelegate = context.coordinator
+        let view = ReaderWebView(frame: .zero, configuration: config)
+        view.owner = coordinator
+        view.navigationDelegate = coordinator
+        view.uiDelegate = coordinator
         view.isOpaque = false
         // Short threads still need to rubber-band, or there's nothing to pull.
         view.scrollView.alwaysBounceVertical = true
         // Watch the offset rather than the scroll view's delegate (WebKit
         // owns that) or its pan gesture (which never reported to us).
-        context.coordinator.watchPull(on: view.scrollView)
+        coordinator.watchPull(on: view.scrollView)
         return view
     }
 
+    func makeUIView(context: Context) -> WKWebView {
+        if let entry = WebViewPreloader.shared.take(key: threadKey) {
+            if entry.html != html { entry.coordinator.load(html, into: entry.view) }
+            return entry.view
+        }
+        return Self.makeWebView(coordinator: context.coordinator)
+    }
+
     func updateUIView(_ view: WKWebView, context: Context) {
-        context.coordinator.onAttachment = onAttachment
-        context.coordinator.onEditDraft = onEditDraft
-        context.coordinator.onDeleteDraft = onDeleteDraft
-        context.coordinator.onMailto = onMailto
-        context.coordinator.onAction = onAction
-        context.coordinator.onPull = onPull
-        context.coordinator.onPullNext = onPullNext
-        context.coordinator.onPullPrevious = onPullPrevious
-        if context.coordinator.needsLoad(html) {
-            context.coordinator.load(html, into: view)
+        let coordinator = (view as? ReaderWebView)?.owner ?? context.coordinator
+        if view.frame.width > 50 { WebViewPreloader.shared.readerSize = view.frame.size }
+        coordinator.onAttachment = onAttachment
+        coordinator.onEditDraft = onEditDraft
+        coordinator.onDeleteDraft = onDeleteDraft
+        coordinator.onMailto = onMailto
+        coordinator.onAction = onAction
+        coordinator.onPull = onPull
+        coordinator.onPullNext = onPullNext
+        coordinator.onPullPrevious = onPullPrevious
+        if coordinator.needsLoad(html) {
+            coordinator.load(html, into: view)
         }
     }
 

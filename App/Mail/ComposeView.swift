@@ -117,7 +117,7 @@ struct ComposeView: View {
                 DisclosureGroup(isExpanded: $showQuoted) {
                     Group {
                         if let html = draft.quotedHTML {
-                            MessageWebView(html: quotedPreviewDoc(html))
+                            MessageWebView(html: quotedPreviewDoc(html), threadKey: "")
                         } else {
                             ScrollView {
                                 Text(draft.quotedText)

@@ -618,7 +618,11 @@ final class AppModel: ObservableObject {
         for offset in [1, -1, 2] {
             let i = idx + offset
             if threads.indices.contains(i) {
-                ThreadDetailModel.prefetch(db: db, thread: threads[i])
+                // The immediate neighbors get a fully loaded offscreen web
+                // view (an advance adopts it already painted); +2 stays an
+                // HTML-only warm-up.
+                ThreadDetailModel.prefetch(db: db, thread: threads[i],
+                                           warmView: abs(offset) == 1)
             }
         }
     }
