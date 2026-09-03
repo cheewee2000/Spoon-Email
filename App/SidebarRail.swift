@@ -43,23 +43,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Three-letter code, the way CW&T tags everything (`CWT_HSM4PW4`).
-    var code: String {
-        switch self {
-        case .unified: "UNI"
-        case .important: "IMP"
-        case .newsletters: "NWS"
-        case .updates: "UPD"
-        case .other: "OTH"
-        case .open: "OPN"
-        case .drafts: "DRF"
-        case .sent: "SNT"
-        case .archived: "ARC"
-        case .blocked: "BLK"
-        case .spam: "SPM"
-        }
-    }
-
     var filter: MailboxFilter {
         switch self {
         case .unified: .unified
@@ -194,10 +177,6 @@ final class SidebarOrder: ObservableObject {
         widths[key] = nil
         defaults.set(widths, forKey: widthsKey)
     }
-
-    func width(_ item: SidebarItem) -> CGFloat { width(key: item.rawValue) }
-    func setWidth(_ width: CGFloat, for item: SidebarItem) { setWidth(width, key: item.rawValue) }
-    func resetWidth(_ item: SidebarItem) { resetWidth(key: item.rawValue) }
 }
 
 // MARK: - Expanded state

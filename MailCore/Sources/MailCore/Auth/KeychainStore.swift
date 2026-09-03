@@ -3,8 +3,6 @@ import Security
 
 enum KeychainStore {
     private static let service = "com.cwandt.spoon.tokens"
-    /// Tokens saved before the app was renamed from SuperDuperHuman.
-    private static let legacyService = "com.cwandt.superduperhuman.tokens"
 
     static func save(_ data: Data, account: String) throws {
         let query: [String: Any] = [
@@ -26,14 +24,6 @@ enum KeychainStore {
     }
 
     static func load(account: String) -> Data? {
-        if let data = load(account: account, service: service) { return data }
-        // One-time migration: re-home tokens from the pre-rename service.
-        guard let data = load(account: account, service: legacyService) else { return nil }
-        try? save(data, account: account)
-        return data
-    }
-
-    private static func load(account: String, service: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

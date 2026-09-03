@@ -169,7 +169,7 @@ final class CoreTests: XCTestCase {
                   {"name": "To", "value": "me@example.com"},
                   {"name": "Subject", "value": "Invoice"}
                 ],
-                "body": {"data": "\(GmailClient.base64URLEncode(Data("about the invoice".utf8)))"}
+                "body": {"data": "\(Data("about the invoice".utf8).base64URLEncoded())"}
               }
             }
             """
@@ -299,7 +299,7 @@ final class CoreTests: XCTestCase {
                 {"name": "Subject", "value": "Widget sale"},
                 {"name": "Message-ID", "value": "<m1@shop>"}
               ],
-              "body": {"data": "\(GmailClient.base64URLEncode(Data("Buy widgets now".utf8)))"}
+              "body": {"data": "\(Data("Buy widgets now".utf8).base64URLEncoded())"}
             }
           }]
         }
@@ -338,7 +338,7 @@ final class CoreTests: XCTestCase {
             "mimeType": "multipart/related",
             "parts": [
               {"partId": "0", "mimeType": "text/html",
-               "body": {"data": "\(GmailClient.base64URLEncode(Data("<img src=\"cid:logo@x\">".utf8)))"}},
+               "body": {"data": "\(Data("<img src=\"cid:logo@x\">".utf8).base64URLEncoded())"}},
               {"partId": "1", "mimeType": "image/png", "filename": "",
                "headers": [{"name": "Content-ID", "value": "<logo@x>"}],
                "body": {"attachmentId": "a1", "size": 12}},

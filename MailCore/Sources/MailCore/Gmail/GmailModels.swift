@@ -160,9 +160,7 @@ public enum MimeParser {
             bodyHTML: html,
             bodyText: text,
             isUnread: g.labelIds?.contains(GmailLabels.unread) ?? false,
-            messageIdHeader: header(g.payload, "Message-ID").isEmpty
-                ? header(g.payload, "Message-Id")
-                : header(g.payload, "Message-ID"),
+            messageIdHeader: header(g.payload, "Message-ID"),
             referencesHeader: header(g.payload, "References"),
             listUnsubscribe: header(g.payload, "List-Unsubscribe"),
             listUnsubscribePost: header(g.payload, "List-Unsubscribe-Post"),

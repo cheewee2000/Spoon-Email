@@ -58,7 +58,7 @@ public enum GoogleOAuth {
     public static func signIn(config: GoogleOAuthConfig, loginHint: String? = nil) async throws -> OAuthTokens {
         guard config.isConfigured else { throw MailError.notConfigured }
         let verifier = randomURLSafe(48)
-        let challenge = base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
+        let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncoded()
         let state = randomURLSafe(16)
 
         var comps = URLComponents(string: authEndpoint)!
@@ -162,14 +162,7 @@ public enum GoogleOAuth {
     static func randomURLSafe(_ byteCount: Int) -> String {
         var bytes = [UInt8](repeating: 0, count: byteCount)
         _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes)
-        return base64URL(Data(bytes))
-    }
-
-    static func base64URL(_ data: Data) -> String {
-        data.base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+        return Data(bytes).base64URLEncoded()
     }
 }
 

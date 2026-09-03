@@ -33,7 +33,7 @@ public extension GmailClient {
 
     /// Sends a raw RFC 2822 message; returns the new Gmail message.
     func send(raw: Data, threadId: String?) async throws -> GMessageMin {
-        var body: [String: Any] = ["raw": GmailClient.base64URLEncode(raw)]
+        var body: [String: Any] = ["raw": raw.base64URLEncoded()]
         if let threadId { body["threadId"] = threadId }
         return try await post("messages/send", json: body)
     }
@@ -151,7 +151,7 @@ public extension GmailClient {
     /// Creates a draft and returns where it lives: the draft id is stable
     /// across edits, the message id changes on every update.
     func createDraft(raw: Data, threadId: String?) async throws -> (draftId: String, messageId: String) {
-        var message: [String: Any] = ["raw": GmailClient.base64URLEncode(raw)]
+        var message: [String: Any] = ["raw": raw.base64URLEncoded()]
         if let threadId { message["threadId"] = threadId }
         let r: DraftResponse = try await post("drafts", json: ["message": message])
         return (r.id, r.message.id)
@@ -168,7 +168,7 @@ public extension GmailClient {
     /// autosave, which would otherwise re-list all drafts on every tick.
     /// Returns the new message id, or nil if the draft was deleted meanwhile.
     func updateDraft(draftId: String, raw: Data, threadId: String?) async throws -> (draftId: String, messageId: String)? {
-        var message: [String: Any] = ["raw": GmailClient.base64URLEncode(raw)]
+        var message: [String: Any] = ["raw": raw.base64URLEncoded()]
         if let threadId { message["threadId"] = threadId }
         do {
             let r: DraftResponse = try await put("drafts/\(draftId)", json: ["message": message])
@@ -187,9 +187,12 @@ public extension GmailClient {
         ])
         return list.messages ?? []
     }
+}
 
-    static func base64URLEncode(_ data: Data) -> String {
-        data.base64EncodedString()
+extension Data {
+    /// RFC 4648 §5 base64url, unpadded — what Gmail's `raw` field and PKCE want.
+    func base64URLEncoded() -> String {
+        base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")

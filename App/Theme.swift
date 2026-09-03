@@ -64,7 +64,6 @@ enum CWT {
 
     /// Body copy in lists and panes.
     static let body = font(13)
-    static let bodyBold = font(13, bold: true)
     /// Captions, dates, counts.
     static let caption = font(11)
     /// Section labels — pair with `.tracking(labelTracking)` and uppercase.

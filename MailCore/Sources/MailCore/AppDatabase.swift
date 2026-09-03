@@ -16,12 +16,6 @@ public final class AppDatabase: Sendable {
             appropriateFor: nil, create: true
         )
         let dir = support.appendingPathComponent("Spoon", isDirectory: true)
-        // Installs from before the rename keep their mailbox — move it over.
-        let legacy = support.appendingPathComponent("SuperDuperHuman", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path),
-           FileManager.default.fileExists(atPath: legacy.path) {
-            try? FileManager.default.moveItem(at: legacy, to: dir)
-        }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var config = Configuration()
         config.prepareDatabase { db in

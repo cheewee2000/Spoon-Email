@@ -6,7 +6,7 @@ import SwiftUI
 struct AvatarView: View {
     let name: String
     let email: String
-    var size: CGFloat = 28
+    let size: CGFloat
 
     @State private var data: Data?
 
