@@ -17,6 +17,7 @@ struct RootView: View {
     @FocusState private var searchFocused: Bool
     #if os(macOS)
     @State private var keyMonitor: Any?
+    @State private var clickMonitor: Any?
     #else
     /// The phone opens on the mail itself (the pager lands on Unified);
     /// the rail stays one back-swipe away.
@@ -210,8 +211,30 @@ struct RootView: View {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             handleGlobalKey(event) ? nil : event
         }
+        // The toolbar search field holds first responder through clicks in
+        // the list and the reader's web view, so the caret stays blinking up
+        // there and every keystroke keeps typing into it. A click anywhere
+        // outside the field ends the search session; the click itself still
+        // goes through.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            releaseSearchIfClickedOutside(event)
+            return event
+        }
         #endif
     }
+
+    #if os(macOS)
+    private func releaseSearchIfClickedOutside(_ event: NSEvent) {
+        guard let window = event.window, window === NSApp.keyWindow,
+              let editor = window.firstResponder as? NSTextView,
+              let field = editor.delegate as? NSSearchField,
+              field.window === window else { return }
+        let inField = field.convert(field.bounds, to: nil).contains(event.locationInWindow)
+        guard !inField else { return }
+        window.makeFirstResponder(nil)
+        searchFocused = false
+    }
+    #endif
 
     #if os(macOS)
     private func handleGlobalKey(_ event: NSEvent) -> Bool {
