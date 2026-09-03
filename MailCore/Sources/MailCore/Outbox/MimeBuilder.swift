@@ -21,7 +21,7 @@ public enum MimeBuilder {
         if !bcc.isEmpty { headers.append("Bcc: \(bcc)") }
         headers.append("Subject: \(encodeHeader(subject))")
         headers.append("Date: \(rfc5322Date(date))")
-        headers.append("Message-ID: <\(UUID().uuidString)@spoon.local>")
+        headers.append("Message-ID: <\(UUID().uuidString)@\(messageIDDomain(fromEmail))>")
         if !inReplyTo.isEmpty { headers.append("In-Reply-To: \(inReplyTo)") }
         if !references.isEmpty { headers.append("References: \(references)") }
         headers.append("MIME-Version: 1.0")
@@ -71,15 +71,18 @@ public enum MimeBuilder {
             lines.append("")
         }
         lines.append("--\(boundary)")
+        // Text parts go quoted-printable, not base64: they stay greppable
+        // in transit and don't trip the spam-filter rules that score base64
+        // text as "disguised" (SpamAssassin MIME_BASE64_TEXT).
         lines.append("Content-Type: text/plain; charset=UTF-8")
-        lines.append("Content-Transfer-Encoding: base64")
+        lines.append("Content-Transfer-Encoding: quoted-printable")
         lines.append("")
-        lines.append(base64Wrapped(plainText))
+        lines.append(quotedPrintable(plainText))
         lines.append("--\(boundary)")
         lines.append("Content-Type: text/html; charset=UTF-8")
-        lines.append("Content-Transfer-Encoding: base64")
+        lines.append("Content-Transfer-Encoding: quoted-printable")
         lines.append("")
-        lines.append(base64Wrapped(html))
+        lines.append(quotedPrintable(html))
         lines.append("--\(boundary)--")
 
         func appendPart(_ attachment: ComposeAttachment, boundary: String) {
@@ -114,8 +117,51 @@ public enum MimeBuilder {
         return f.string(from: date)
     }
 
-    static func base64Wrapped(_ s: String) -> String {
-        base64Wrapped(Data(s.utf8))
+    /// The right-hand side of Message-ID: the sender's own domain. Filters
+    /// score IDs whose domain isn't a real FQDN (`@spoon.local` was one).
+    static func messageIDDomain(_ fromEmail: String) -> String {
+        let trimmed = fromEmail.trimmingCharacters(in: CharacterSet(charactersIn: " <>"))
+        guard let at = trimmed.lastIndex(of: "@") else { return "spoon.local" }
+        let domain = trimmed[trimmed.index(after: at)...]
+            .trimmingCharacters(in: CharacterSet(charactersIn: " <>"))
+        return domain.isEmpty ? "spoon.local" : domain
+    }
+
+    /// RFC 2045 §6.7 quoted-printable. Printable ASCII passes through, `=`
+    /// and everything else becomes `=XX`, trailing whitespace on a line is
+    /// escaped so it survives transit, newlines become hard CRLF breaks, and
+    /// lines are soft-wrapped with `=` so none exceeds 76 characters.
+    static func quotedPrintable(_ s: String) -> String {
+        let bytes = Array(s.replacingOccurrences(of: "\r\n", with: "\n").utf8)
+        let hex = Array("0123456789ABCDEF")
+        var out = ""
+        var lineLength = 0
+        func emit(_ token: String) {
+            if lineLength + token.count > 75 {
+                out += "=\r\n"
+                lineLength = 0
+            }
+            out += token
+            lineLength += token.count
+        }
+        func escaped(_ b: UInt8) -> String {
+            "=" + String(hex[Int(b >> 4)]) + String(hex[Int(b & 0xF)])
+        }
+        for (i, b) in bytes.enumerated() {
+            switch b {
+            case 10:
+                out += "\r\n"
+                lineLength = 0
+            case 32, 9:
+                let endsLine = i + 1 == bytes.count || bytes[i + 1] == 10
+                emit(endsLine ? escaped(b) : String(UnicodeScalar(b)))
+            case 33...126 where b != 61:
+                emit(String(UnicodeScalar(b)))
+            default:
+                emit(escaped(b))
+            }
+        }
+        return out
     }
 
     static func base64Wrapped(_ data: Data) -> String {

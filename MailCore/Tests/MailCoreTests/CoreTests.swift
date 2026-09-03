@@ -68,9 +68,36 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(raw.contains("multipart/alternative"))
         XCTAssertFalse(raw.contains("Cc:"))
 
-        // The plain-text part decodes back to the original body
-        let b64 = Data("Line one\nLine two".utf8).base64EncodedString()
-        XCTAssertTrue(raw.replacingOccurrences(of: "\r\n", with: "").contains(b64))
+        // Text parts travel quoted-printable and decode back to the body
+        XCTAssertTrue(raw.contains("Content-Transfer-Encoding: quoted-printable\r\n\r\nLine one\r\nLine two\r\n"))
+        XCTAssertFalse(raw.contains("Content-Transfer-Encoding: base64"))
+    }
+
+    func testMimeBuilderMessageIDUsesSenderDomain() throws {
+        let data = MimeBuilder.build(
+            fromEmail: "me@example.com", to: "you@example.com", cc: "", bcc: "",
+            subject: "Hi", bodyText: "x", inReplyTo: "", references: "")
+        let raw = String(data: data, encoding: .utf8)!
+        let line = try XCTUnwrap(raw.components(separatedBy: "\r\n").first { $0.hasPrefix("Message-ID: <") })
+        XCTAssertTrue(line.hasSuffix("@example.com>"), line)
+        XCTAssertFalse(raw.contains("spoon.local"))
+        XCTAssertEqual(MimeBuilder.messageIDDomain("Name <me@cwandt.com>"), "cwandt.com")
+    }
+
+    func testQuotedPrintableEncoding() {
+        // Non-ASCII, '=', and trailing whitespace are escaped; newlines are
+        // hard CRLF breaks; nothing passes through unchanged that shouldn't.
+        XCTAssertEqual(MimeBuilder.quotedPrintable("caf\u{E9} a=b \nnext"),
+                       "caf=C3=A9 a=3Db=20\r\nnext")
+        XCTAssertEqual(MimeBuilder.quotedPrintable("tab\t\nx"), "tab=09\r\nx")
+        // Long lines soft-wrap so no encoded line exceeds 76 characters, and
+        // the decoded text is unchanged.
+        let long = String(repeating: "abcdefghij", count: 20) + " \u{2728} end"
+        let encoded = MimeBuilder.quotedPrintable(long)
+        for line in encoded.components(separatedBy: "\r\n") {
+            XCTAssertLessThanOrEqual(line.count, 76, line)
+        }
+        XCTAssertEqual(qpDecode(encoded), long)
     }
 
     /// A rich reply ships its formatting in the HTML part while the text/plain
@@ -83,13 +110,13 @@ final class CoreTests: XCTestCase {
             bodyHTML: "<div><b>bold</b> word</div>",
             quotedText: "> earlier", quotedHTML: "<blockquote>earlier</blockquote>",
             inReplyTo: "", references: "")
-        let raw = String(data: data, encoding: .utf8)!.replacingOccurrences(of: "\r\n", with: "")
+        let raw = String(data: data, encoding: .utf8)!
 
         let html = "<div style=\"font-family:-apple-system,sans-serif;font-size:14px\">"
             + "<div><b>bold</b> word</div></div><blockquote>earlier</blockquote>"
-        XCTAssertTrue(raw.contains(Data(html.utf8).base64EncodedString()),
+        XCTAssertTrue(qpDecode(raw).contains(html),
                       "HTML part must carry the composed rich text as-is")
-        XCTAssertTrue(raw.contains(Data("bold word\n\n> earlier".utf8).base64EncodedString()),
+        XCTAssertTrue(qpDecode(raw).contains("bold word\n\n> earlier"),
                       "plain part must still be the plain body plus quote")
     }
 
@@ -209,10 +236,10 @@ final class CoreTests: XCTestCase {
         let data = MimeBuilder.build(
             fromEmail: "me@example.com", to: "you@example.com", cc: "", bcc: "",
             subject: "Hi", bodyText: "a < b\nnext", inReplyTo: "", references: "")
-        let raw = String(data: data, encoding: .utf8)!.replacingOccurrences(of: "\r\n", with: "")
+        let raw = String(data: data, encoding: .utf8)!
         let html = "<div style=\"font-family:-apple-system,sans-serif;font-size:14px\">"
             + "a &lt; b<br>next</div>"
-        XCTAssertTrue(raw.contains(Data(html.utf8).base64EncodedString()))
+        XCTAssertTrue(qpDecode(raw).contains(html))
     }
 
     func testMimeBuilderEncodesUnicodeSubject() {
@@ -659,4 +686,23 @@ final class MimeMixedTests: XCTestCase {
         XCTAssertFalse(onlyFile.contains("multipart/related"))
         XCTAssertTrue(onlyFile.contains("multipart/mixed"))
     }
+}
+
+/// Undoes quoted-printable: `=XX` back to a byte, `=CRLF` soft breaks removed,
+/// hard CRLF back to LF. Runs over a whole message; headers and boundaries
+/// carry no `=XX` sequences so they pass through unchanged.
+private func qpDecode(_ s: String) -> String {
+    let bytes = Array(s.utf8)
+    var out: [UInt8] = []
+    var i = 0
+    while i < bytes.count {
+        if bytes[i] == 61, i + 2 < bytes.count {
+            if bytes[i + 1] == 13, bytes[i + 2] == 10 { i += 3; continue }
+            if let v = UInt8(String(decoding: bytes[(i + 1)...(i + 2)], as: UTF8.self), radix: 16) {
+                out.append(v); i += 3; continue
+            }
+        }
+        out.append(bytes[i]); i += 1
+    }
+    return String(decoding: out, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
 }
