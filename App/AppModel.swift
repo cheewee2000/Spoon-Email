@@ -55,7 +55,7 @@ final class AppModel: ObservableObject {
     @Published var lastError: String?
     @Published var syncStatus: String?
     @Published var draft: ComposeDraft?
-    @Published var undoToast: (id: String, until: Date)?
+    @Published var undoToast: (id: String, until: Date, draft: ComposeDraft)?
     /// The mailbox filling the window, or `nil` for the board — the
     /// side-by-side view of every mailbox at once, which is where the app
     /// starts and where Escape always lands you.
@@ -965,7 +965,7 @@ final class AppModel: ObservableObject {
             do {
                 try await outbox.schedule(item)
                 if date == nil {
-                    undoToast = (item.id, sendAt)
+                    undoToast = (item.id, sendAt, draft)
                 } else {
                     syncStatus = "Scheduled for \(sendAt.formatted(date: .abbreviated, time: .shortened))"
                     Task {
@@ -1291,6 +1291,8 @@ final class AppModel: ObservableObject {
             let cancelled = await outbox.cancel(id: toast.id)
             if !cancelled {
                 lastError = "Too late — the message was already sent."
+            } else if draft == nil {
+                draft = toast.draft
             }
         }
     }
