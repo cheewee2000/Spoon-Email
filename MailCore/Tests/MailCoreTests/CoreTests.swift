@@ -417,12 +417,21 @@ final class CoreTests: XCTestCase {
                             isUnread: false, messageIdHeader: "", referencesHeader: "",
                             listUnsubscribe: "", listUnsubscribePost: "", isDraft: false).insert(db)
             }
-            try BlockRule(pattern: "spam@foo.com", kind: "email").insert(db)
-            try BlockRule(pattern: "bar.com", kind: "domain").insert(db)
         }
+        let engine = SyncEngine(db: db, tokens: TokenManager(
+            config: GoogleOAuthConfig(clientID: "x.apps.googleusercontent.com")))
+        let emailRule = try await engine.addBlock(pattern: "Spam@Foo.com", kind: "email").rule
+        _ = try await engine.addBlock(pattern: "bar.com", kind: "domain")
 
-        let blocked = try await db.writer.read { db in try MailboxFilter.blocked.fetch(db) }
-        XCTAssertEqual(Set(blocked.map(\.id)), ["t1", "t2"])
+        func blocked() async throws -> Set<String> {
+            Set(try await db.writer.read { db in try MailboxFilter.blocked.fetch(db) }.map(\.id))
+        }
+        let caught = try await blocked()
+        XCTAssertEqual(caught, ["t1", "t2"], "the flag is set by the rule scan")
+
+        await engine.removeBlock(emailRule)
+        let remaining = try await blocked()
+        XCTAssertEqual(remaining, ["t2"], "dropping a rule unflags what only it caught")
     }
 
     // MARK: - Optimistic mutations

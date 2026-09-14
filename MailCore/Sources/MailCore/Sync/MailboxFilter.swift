@@ -107,22 +107,10 @@ public enum MailboxFilter: Hashable, Sendable {
             // Everything a block rule matches, wherever it ended up — blocked
             // mail is archived on arrival, so this is the only place it can be
             // seen as a group, and the only way to tell a rule that's doing
-            // its job from one that's eating mail you wanted.
-            //
-            // Driven from `message` rather than a correlated EXISTS per
-            // thread: the latter re-runs the rule match for every thread in
-            // the database.
-            return try MailThread.fetchAll(db, sql: """
-                SELECT t.* FROM thread t
-                JOIN (
-                    SELECT DISTINCT m.accountId, m.threadId
-                    FROM message m
-                    JOIN blocked b
-                      ON (b.kind = 'email' AND lower(m.fromEmail) = b.pattern)
-                      OR (b.kind = 'domain' AND lower(m.fromEmail) LIKE '%@' || b.pattern)
-                ) f ON f.accountId = t.accountId AND f.threadId = t.id
-                \(order)
-                """)
+            // its job from one that's eating mail you wanted. `isBlocked` is
+            // kept by the sync engine (migration v16), so this is an index walk.
+            return try MailThread.fetchAll(
+                db, sql: "SELECT t.* FROM thread t WHERE t.isBlocked = 1 \(order)")
         case .spam:
             return try MailThread.fetchAll(db, sql: "SELECT t.* \(plainJoin) \(order)",
                                            arguments: [GmailLabels.spam])

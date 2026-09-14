@@ -319,6 +319,21 @@ public final class AppDatabase: Sendable {
             // trick as the inbox.
             try db.execute(sql: "CREATE INDEX index_thread_open_date ON thread(lastDate) WHERE isOpen = 1")
         }
+        m.registerMigration("v16") { db in
+            // The Blocked mailbox re-ran a rules-vs-every-message scan (5s on
+            // a million messages) on every commit. Denormalize like isInbox:
+            // the sync sets the flag as threads are stored, addBlock/removeBlock
+            // adjust it, and the mailbox walks a partial index. Not kept by
+            // MailThread (it doesn't encode the column), so saves leave it alone.
+            try db.execute(sql: "ALTER TABLE thread ADD COLUMN isBlocked BOOLEAN NOT NULL DEFAULT 0")
+            try db.execute(sql: """
+                UPDATE thread SET isBlocked = 1 WHERE EXISTS (
+                    SELECT 1 FROM message m JOIN blocked b ON \(BlockRule.matchSQL)
+                    WHERE m.accountId = thread.accountId AND m.threadId = thread.id
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX index_thread_blocked_date ON thread(lastDate) WHERE isBlocked = 1")
+        }
         return m
     }
 }

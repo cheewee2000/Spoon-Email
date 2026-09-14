@@ -509,7 +509,8 @@ public actor SyncEngine {
                 .filter { Date().timeIntervalSince($0.at) < Self.localDeltaTTL }
                 .map { (add: $0.add, remove: $0.remove) }
 
-        try await db.writer.write { [labelSet, messages, attachments, liveIds, placeholders, localDeltas, openId] db in
+        let blocked = try await matchesBlockRule(senders: messages.map(\.fromEmail))
+        try await db.writer.write { [labelSet, messages, attachments, liveIds, placeholders, localDeltas, openId, blocked] db in
             // Queued ops are read inside the transaction, so one committing
             // between the earlier reads and this write still counts.
             let pending = try PendingOp
@@ -548,8 +549,8 @@ public actor SyncEngine {
                 thread.isOpen = openId.map { finalLabels.contains($0) } ?? false
             }
             try thread.save(db)
-            try db.execute(sql: "UPDATE thread SET syncSig = ? WHERE accountId = ? AND id = ?",
-                           arguments: [signature, accountId, gThread.id])
+            try db.execute(sql: "UPDATE thread SET syncSig = ?, isBlocked = ? WHERE accountId = ? AND id = ?",
+                           arguments: [signature, blocked, accountId, gThread.id])
             // Attachments first: this scopes by joining `message`, so it has
             // to run while the stale message rows are still present.
             try db.execute(
@@ -601,12 +602,9 @@ public actor SyncEngine {
         }
 
         // Blocked sender/domain → auto-archive on arrival
-        if labelSet.contains(GmailLabels.inbox) {
-            let senders = messages.map(\.fromEmail)
-            if try await matchesBlockRule(senders: senders) {
-                await archive(accountId: accountId, threadId: gThread.id)
-                return []   // blocked mail is filed away, not announced
-            }
+        if blocked, labelSet.contains(GmailLabels.inbox) {
+            await archive(accountId: accountId, threadId: gThread.id)
+            return []   // blocked mail is filed away, not announced
         }
 
         guard detectNewMail, labelSet.contains(GmailLabels.inbox) else { return [] }
@@ -678,17 +676,23 @@ public actor SyncEngine {
         }
         blockRulesCache = nil
 
-        let rows: [(String, String)] = try await db.writer.read { db in
-            let sql = """
+        // One scan of every message for the new rule (seconds on a big
+        // mailbox — once per rule, not per commit): flag what it catches,
+        // and sweep the caught threads still sitting in the inbox.
+        let rows: [(String, String)] = try await db.writer.write { [rule] db in
+            try db.execute(sql: """
+                UPDATE thread SET isBlocked = 1 WHERE isBlocked = 0 AND EXISTS (
+                    SELECT 1 FROM message m JOIN blocked b ON b.id = ? AND \(BlockRule.matchSQL)
+                    WHERE m.accountId = thread.accountId AND m.threadId = thread.id
+                )
+                """, arguments: [rule.id])
+            return try Row.fetchAll(db, sql: """
                 SELECT DISTINCT t.accountId, t.id FROM thread t
                 JOIN thread_label tl ON tl.accountId = t.accountId AND tl.threadId = t.id AND tl.labelId = ?
                 JOIN message m ON m.accountId = t.accountId AND m.threadId = t.id
-                WHERE (? = 'email' AND lower(m.fromEmail) = ?)
-                   OR (? = 'domain' AND lower(m.fromEmail) LIKE '%@' || ?)
-                """
-            return try Row.fetchAll(db, sql: sql, arguments: [
-                GmailLabels.inbox, kind, rule.pattern, kind, rule.pattern,
-            ]).map { ($0[0], $0[1]) }
+                JOIN blocked b ON b.id = ? AND \(BlockRule.matchSQL)
+                WHERE t.isBlocked = 1
+                """, arguments: [GmailLabels.inbox, rule.id]).map { ($0[0], $0[1]) }
         }
         for (accountId, threadId) in rows {
             await archive(accountId: accountId, threadId: threadId)
@@ -697,7 +701,16 @@ public actor SyncEngine {
     }
 
     public func removeBlock(_ rule: BlockRule) async {
-        _ = try? await db.writer.write { db in try rule.delete(db) }
+        _ = try? await db.writer.write { db in
+            try rule.delete(db)
+            // Only the flagged threads are re-checked against what's left.
+            try db.execute(sql: """
+                UPDATE thread SET isBlocked = 0 WHERE isBlocked = 1 AND NOT EXISTS (
+                    SELECT 1 FROM message m JOIN blocked b ON \(BlockRule.matchSQL)
+                    WHERE m.accountId = thread.accountId AND m.threadId = thread.id
+                )
+                """)
+        }
         blockRulesCache = nil
     }
 

@@ -111,6 +111,13 @@ public struct Attachment: Codable, Sendable, Hashable, FetchableRecord, Persista
 
 public struct BlockRule: Codable, Sendable, Hashable, Identifiable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "blocked"
+    /// SQL for "message m matches rule b" — the one place the scans that
+    /// keep `thread.isBlocked` (migration backfill, rule add/remove) agree
+    /// on what a match is. Keep in step with `matches(email:)`.
+    public static let matchSQL = """
+        ((b.kind = 'email' AND lower(m.fromEmail) = b.pattern)
+         OR (b.kind = 'domain' AND lower(m.fromEmail) LIKE '%@' || b.pattern))
+        """
     public var id: Int64?
     public var pattern: String   // "spam@foo.com" or "foo.com"
     public var kind: String      // "email" | "domain"
