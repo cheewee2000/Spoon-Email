@@ -431,7 +431,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             Task { await self.syncEngine.archive(accountId: thread.accountId, threadId: thread.id) }
         }
-        ThreadListModel.noteUserAction()
+        ThreadListModel.unhideEverywhere(thread.key)
         Task { await syncEngine.unarchive(accountId: thread.accountId, threadId: thread.id, restoreOpen: false) }
     }
 
@@ -443,6 +443,7 @@ final class AppModel: ObservableObject {
         ThreadListModel.hideEverywhere(thread.key)
         pushUndo("Move") { [weak self] in
             guard let self else { return }
+            ThreadListModel.unhideEverywhere(thread.key)
             Task {
                 await self.syncEngine.modifyThread(accountId: thread.accountId, threadId: thread.id,
                                                    add: [], remove: [labelId])
@@ -493,6 +494,7 @@ final class AppModel: ObservableObject {
         ThreadListModel.hideEverywhere(thread.key)
         pushUndo("Archive") { [weak self] in
             guard let self else { return }
+            ThreadListModel.unhideEverywhere(thread.key)
             Task {
                 await self.syncEngine.unarchive(accountId: thread.accountId, threadId: thread.id,
                                                 restoreOpen: thread.isOpen)
@@ -538,6 +540,7 @@ final class AppModel: ObservableObject {
         let wasOpen = thread.isOpen
         pushUndo(wasOpen ? "Close" : "Open") { [weak self] in
             guard let self else { return }
+            ThreadListModel.unhideEverywhere(thread.key)
             Task {
                 await self.syncEngine.setOpen(accountId: thread.accountId, threadId: thread.id,
                                               open: wasOpen)
@@ -1098,6 +1101,7 @@ final class AppModel: ObservableObject {
                 // Undo drops the rule *and* returns everything it swept out.
                 pushUndo("Block \(pattern)") { [weak self] in
                     guard let self else { return }
+                    ThreadListModel.unhideEverywhere(thread.key)
                     Task {
                         await self.syncEngine.removeBlock(rule)
                         for ref in archived {

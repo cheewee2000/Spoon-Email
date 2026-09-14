@@ -90,15 +90,27 @@ final class ThreadListModel: ObservableObject {
     }
 
     /// Key → when it was hidden. Released once a delivery arrives without
-    /// it, or after a few seconds regardless (an undo that lands before the
-    /// commit's delivery would otherwise keep it filtered).
+    /// it (the commit), or by `unhideEverywhere` (an undo). Not on a short
+    /// timer: the commit's delivery is a refetch queued on the reader pool,
+    /// and with ten lists observing, neighbor pages prefetching, and a cold
+    /// 24GB file, that fetch can wait well past a few seconds — a 3s cap
+    /// flashed the row back in until it landed. The long cap is only a
+    /// safety net for a write that never commits.
     private var hidden: [String: Date] = [:]
+    private static let hiddenCap: TimeInterval = 30
+
+    /// The undo of a hide: the row is welcome back as soon as its delivery
+    /// arrives, instead of waiting out the cap.
+    static func unhideEverywhere(_ key: String) {
+        noteUserAction()
+        for entry in live { entry.value?.hidden.removeValue(forKey: key) }
+    }
 
     private func filtered(_ threads: [MailThread]) -> [MailThread] {
         guard !hidden.isEmpty else { return threads }
         let present = Set(threads.map(\.key))
         let now = Date()
-        hidden = hidden.filter { present.contains($0.key) && now.timeIntervalSince($0.value) < 3 }
+        hidden = hidden.filter { present.contains($0.key) && now.timeIntervalSince($0.value) < Self.hiddenCap }
         guard !hidden.isEmpty else { return threads }
         return threads.filter { hidden[$0.key] == nil }
     }

@@ -313,6 +313,12 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "CREATE INDEX index_thread_inbox_category_date ON thread(category, lastDate) WHERE isInbox = 1")
             try db.execute(sql: "CREATE INDEX index_thread_inbox_account_date ON thread(accountId, lastDate) WHERE isInbox = 1")
         }
+        m.registerMigration("v15") { db in
+            // The Open mailbox walked every thread newest-first looking for
+            // isOpen = 1 (160ms per commit, every commit); same partial-index
+            // trick as the inbox.
+            try db.execute(sql: "CREATE INDEX index_thread_open_date ON thread(lastDate) WHERE isOpen = 1")
+        }
         return m
     }
 }

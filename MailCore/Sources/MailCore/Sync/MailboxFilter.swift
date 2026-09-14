@@ -71,8 +71,19 @@ public enum MailboxFilter: Hashable, Sendable {
             return try MailThread.fetchAll(
                 db, sql: "SELECT t.* FROM thread t WHERE t.isOpen = 1 \(order)")
         case .sent:
-            return try MailThread.fetchAll(db, sql: "SELECT t.* \(plainJoin) \(order)",
-                                           arguments: [GmailLabels.sent])
+            // EXISTS, not the join: SENT is on 150k+ threads, and joining
+            // them all just to sort by lastDate cost 400ms (2s cold) on every
+            // commit. Walking threads newest-first and probing the label
+            // stops after `limit` hits in ~10ms. Drafts and spam keep the
+            // join — those labels are sparse, so the join side is tiny.
+            return try MailThread.fetchAll(db, sql: """
+                SELECT t.* FROM thread t
+                WHERE EXISTS (
+                    SELECT 1 FROM thread_label x
+                    WHERE x.accountId = t.accountId AND x.threadId = t.id AND x.labelId = ?
+                )
+                \(order)
+                """, arguments: [GmailLabels.sent])
         case .drafts:
             return try MailThread.fetchAll(db, sql: "SELECT t.* \(plainJoin) \(order)",
                                            arguments: [GmailLabels.draft])
