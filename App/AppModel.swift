@@ -154,12 +154,13 @@ final class AppModel: ObservableObject {
     private func startWidgetSnapshots() {
         widgetCancellable = ValueObservation
             .tracking { db -> (Int, Int, [MailThread]) in
+                // Same shape as MailboxFilter.unified: the isInbox flag and
+                // its partial index, not a walk of every INBOX label row.
                 let unified = try Int.fetchOne(db, sql: """
                     SELECT COUNT(*) FROM thread t
-                    JOIN account a ON a.id = t.accountId AND a.includeInUnified = 1
-                    JOIN thread_label tl ON tl.accountId = t.accountId AND tl.threadId = t.id AND tl.labelId = ?
-                    WHERE t.isOpen = 0 AND t.isUnread = 1
-                    """, arguments: [GmailLabels.inbox]) ?? 0
+                    WHERE t.isInbox = 1 AND t.isOpen = 0 AND t.isUnread = 1
+                      AND t.accountId IN (SELECT id FROM account WHERE includeInUnified = 1)
+                    """) ?? 0
                 let open = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM thread WHERE isOpen = 1 AND isUnread = 1") ?? 0
                 let threads = try MailboxFilter.unified.fetch(db, limit: 8)
                 return (unified, open, threads)

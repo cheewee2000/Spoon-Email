@@ -137,9 +137,12 @@ final class ThreadListModel: ObservableObject {
         lastApplied = .distantPast
         let filter = self.filter
         let limit = self.limit
+        // Most commits are the sync storing a thread that isn't in this
+        // window at all; dedupe on the reader so those never reach the main
+        // thread (ten lists x a 300-row SwiftUI diff per commit, otherwise).
         let observation = ValueObservation.tracking { db in
             try filter.fetch(db, limit: limit)
-        }
+        }.removeDuplicates()
         cancellable = observation.start(
             in: db.writer,
             scheduling: .async(onQueue: .main)
@@ -199,7 +202,7 @@ final class ThreadListModel: ObservableObject {
         }
         let observation = ValueObservation.tracking { db in
             try MailSearch.threads(db, match: match)
-        }
+        }.removeDuplicates()
         cancellable = observation.start(
             in: db.writer,
             scheduling: .async(onQueue: .main)
@@ -339,7 +342,11 @@ final class ThreadDetailModel: ObservableObject {
         let client = accounts.client(for: accountId)
         let inlineImages = self.inlineImages
         let avatars = self.avatars
-        let observation = ValueObservation.tracking { db -> ([Message], [String: [Attachment]], String, Int) in
+        // Fetch, then dedupe, then render: every sync commit touches the
+        // message table and refires this, and re-serializing a megabyte of
+        // bodies for an unchanged thread was the cost. The render still runs
+        // on GRDB's reduce queue, not the main thread.
+        let observation = ValueObservation.tracking { db -> ([Message], [String: [Attachment]]) in
             let messages = try Message.fetchAll(
                 db,
                 sql: "SELECT * FROM message WHERE accountId = ? AND threadId = ? ORDER BY date",
@@ -352,7 +359,10 @@ final class ThreadDetailModel: ObservableObject {
                 WHERE m.accountId = ? AND m.threadId = ?
                 """,
                 arguments: [accountId, threadId])
-            let byMessage = Dictionary(grouping: attachments, by: \.messageId)
+            return (messages, Dictionary(grouping: attachments, by: \.messageId))
+        }
+        .removeDuplicates(by: ==)
+        .map { messages, byMessage -> ([Message], [String: [Attachment]], String, Int) in
             // Stamp the render with the map versions it was built from: the
             // page travels DB queue → main, and the fetch tasks can land bytes
             // and publish a fresher page in between. Without the stamp that

@@ -8,11 +8,13 @@ struct AvatarView: View {
     let email: String
     let size: CGFloat
 
-    @State private var data: Data?
+    /// Decoded once when the bytes land. Decoding in `body` re-ran the
+    /// image decoder for every row on every list delivery.
+    @State private var image: Image?
 
     var body: some View {
         Group {
-            if let data, let image = Self.image(from: data) {
+            if let image {
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -32,9 +34,10 @@ struct AvatarView: View {
         // other photograph in the system.
         .overlay(Rectangle().strokeBorder(CWT.hairline, lineWidth: 1))
         .task(id: email) {
-            data = nil
-            guard !email.isEmpty else { return }
-            data = await AvatarStore.shared.avatar(for: email)
+            image = nil
+            guard !email.isEmpty,
+                  let data = await AvatarStore.shared.avatar(for: email) else { return }
+            image = Self.image(from: data)
         }
     }
 
