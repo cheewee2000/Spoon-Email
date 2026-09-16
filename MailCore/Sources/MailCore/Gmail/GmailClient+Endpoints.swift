@@ -130,16 +130,21 @@ public extension GmailClient {
 
     /// Deletes the Gmail draft wrapping the given draft *message* id.
     /// Used after an edited draft is sent so the stale draft doesn't linger.
+    /// A 404 means the draft is already gone (deleted twice, or the local
+    /// message id went stale after an autosave) — that's the outcome we
+    /// wanted, so it's not an error.
     func deleteDraft(messageId: String) async throws {
-        if let id = try await draftId(forMessageId: messageId) {
-            try await delete("drafts/\(id)")
-        } else {
-            // No draft wrapper found — trash the underlying message, which
-            // discards the draft too (never fail silently here: a missed
-            // delete resurrects the draft on the next sync).
-            struct Empty: Decodable {}
-            let _: Empty = try await post("messages/\(messageId)/trash", json: [:])
-        }
+        do {
+            if let id = try await draftId(forMessageId: messageId) {
+                try await delete("drafts/\(id)")
+            } else {
+                // No draft wrapper found — trash the underlying message, which
+                // discards the draft too (never fail silently on other errors:
+                // a missed delete resurrects the draft on the next sync).
+                struct Empty: Decodable {}
+                let _: Empty = try await post("messages/\(messageId)/trash", json: [:])
+            }
+        } catch MailError.http(404, _) {}
     }
 
     private struct DraftResponse: Decodable {
