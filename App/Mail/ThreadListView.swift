@@ -29,12 +29,21 @@ struct ThreadListView: View {
                     .tag(thread.key)
                     .listRowSeparatorTint(CWT.hairline)
                     .swipeActions(edge: .trailing) {
-                        Button {
-                            model.archive(thread)
-                        } label: {
-                            Label("Archive", systemImage: "archivebox")
+                        if model.mailbox == .spam {
+                            Button {
+                                model.notSpam(thread)
+                            } label: {
+                                Label("Not Spam", systemImage: "checkmark.shield")
+                            }
+                            .tint(CWT.green)
+                        } else {
+                            Button {
+                                model.archive(thread)
+                            } label: {
+                                Label("Archive", systemImage: "archivebox")
+                            }
+                            .tint(CWT.green)
                         }
-                        .tint(CWT.green)
                     }
                     .contextMenu { ThreadContextMenu(thread: thread) }
                     .hotkeyHoverTarget(thread, model: model)

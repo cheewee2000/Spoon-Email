@@ -429,6 +429,23 @@ final class AppModel: ObservableObject {
     }
 
     /// Back to the inbox from Archived (or anywhere else).
+    /// Gmail's "Not spam": drop SPAM and put the thread back in the inbox.
+    func notSpam(_ thread: MailThread) {
+        ThreadListModel.hideEverywhere(thread.key)
+        pushUndo("Not Spam") { [weak self] in
+            guard let self else { return }
+            ThreadListModel.unhideEverywhere(thread.key)
+            Task {
+                await self.syncEngine.modifyThread(accountId: thread.accountId, threadId: thread.id,
+                                                   add: [GmailLabels.spam], remove: [GmailLabels.inbox])
+            }
+        }
+        Task {
+            await syncEngine.modifyThread(accountId: thread.accountId, threadId: thread.id,
+                                          add: [GmailLabels.inbox], remove: [GmailLabels.spam])
+        }
+    }
+
     func unarchive(_ thread: MailThread) {
         pushUndo("Move to Inbox") { [weak self] in
             guard let self else { return }

@@ -322,6 +322,11 @@ struct RootView: View {
     private var paletteActions: [PaletteAction] {
         var actions: [PaletteAction] = []
         if let t = model.selectedThread {
+            if model.mailbox == .spam {
+                actions.append(PaletteAction("Not Spam", systemImage: "checkmark.shield") {
+                    model.notSpam(t)
+                })
+            }
             actions.append(PaletteAction("Archive", systemImage: "archivebox", shortcut: "E") {
                 model.archiveSelected(in: model.activeList?.threads ?? [])
             })

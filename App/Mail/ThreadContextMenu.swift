@@ -48,7 +48,9 @@ struct ThreadContextMenu: View {
 
         Divider()
 
-        if inInbox {
+        if labels.contains(GmailLabels.spam) {
+            Button("Not Spam") { model.notSpam(thread) }
+        } else if inInbox {
             Button("Archive") { model.archive(thread) }
         } else {
             Button("Move to Inbox") { model.unarchive(thread) }
