@@ -528,9 +528,11 @@ struct UndoToast: View {
                     .monospacedDigit()
                 // ⌘Z lives on the Edit ▸ Undo menu item now, which routes to
                 // the pending send while this toast is up.
-                Button("Undo", action: undo)
-                    .buttonStyle(.textAction)
-                    .help("Undo Send (⌘Z)")
+                // Paper on ink: the style's default ink text vanished on the
+                // ink bar, so the button was there but invisible.
+                Button("Cancel send", action: undo)
+                    .buttonStyle(.textAction(CWT.paper))
+                    .help("Cancel Send (⌘Z)")
             }
             .foregroundStyle(CWT.paper)
             .padding(.horizontal, 16)
