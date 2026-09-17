@@ -127,7 +127,7 @@ public actor SyncEngine {
     /// unless asked, so backfill never brings it in; Gmail also purges spam
     /// after 30 days, so this is a page or two, not a second backfill.
     private func catchUpSpam(account: Account) async throws {
-        let client = GmailClient(accountId: account.id, tokens: tokens)
+        let client = GmailClient(accountId: account.id, tokens: tokens, background: true)
         var pageToken: String? = nil
         repeat {
             let page = try await client.listThreads(labelIds: [GmailLabels.spam],
@@ -169,7 +169,7 @@ public actor SyncEngine {
                 continue
             }
             statusHandler?("Restoring inline images for \(account.email)…")
-            let client = GmailClient(accountId: account.id, tokens: tokens)
+            let client = GmailClient(accountId: account.id, tokens: tokens, background: true)
             var failures = 0
             for threadId in threadIds {
                 do {
@@ -290,7 +290,7 @@ public actor SyncEngine {
     static let backfillChunk = 300
 
     private func continueBackfill(account: Account) async throws {
-        let client = GmailClient(accountId: account.id, tokens: tokens)
+        let client = GmailClient(accountId: account.id, tokens: tokens, background: true)
         var pageToken = account.backfillPageToken
         var processed = 0
 

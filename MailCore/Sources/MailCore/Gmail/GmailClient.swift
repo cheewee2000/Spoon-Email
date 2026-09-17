@@ -5,11 +5,15 @@ import Foundation
 public struct GmailClient: Sendable {
     public let accountId: String
     private let tokens: TokenManager
+    /// Backfill/repair traffic: waits at the lower quota line so it can never
+    /// crowd out a save, send or refresh.
+    let background: Bool
     private static let base = "https://gmail.googleapis.com/gmail/v1/users/me/"
 
-    public init(accountId: String, tokens: TokenManager) {
+    public init(accountId: String, tokens: TokenManager, background: Bool = false) {
         self.accountId = accountId
         self.tokens = tokens
+        self.background = background
     }
 
     // MARK: - Endpoints
@@ -51,6 +55,8 @@ public struct GmailClient: Sendable {
         if !query.isEmpty { comps.queryItems = query }
         let url = comps.url!
 
+        await QuotaGate.shared.acquire(cost: Self.cost(method: method, path: path),
+                                       cap: background ? QuotaGate.backgroundCap : QuotaGate.cap)
         var attempt = 0
         var forceRefresh = false
         while true {
@@ -85,5 +91,60 @@ public struct GmailClient: Sendable {
                 throw MailError.http(code, String(data: data, encoding: .utf8) ?? "")
             }
         }
+    }
+}
+
+// MARK: - Quota
+
+/// Gmail's per-user budget is metered in "quota units" per minute (this
+/// project's limit is 6000). Every request books its cost here first and
+/// waits for the rolling window to drain when it would overspend. Two lines:
+/// background passes stop at `backgroundCap`, so the band above it is always
+/// free for interactive calls.
+/// ponytail: one process's view of a per-user quota — a phone running the
+/// same account spends from the same pool, which is why both caps sit well
+/// under 6000.
+actor QuotaGate {
+    static let shared = QuotaGate()
+    static let cap = 4500
+    static let backgroundCap = 2000
+    private let window: TimeInterval = 60
+    private var spent: [(at: Date, cost: Int)] = []
+
+    func acquire(cost: Int, cap: Int) async {
+        while true {
+            let now = Date()
+            spent.removeAll { now.timeIntervalSince($0.at) > window }
+            let total = spent.reduce(0) { $0 + $1.cost }
+            if total + cost <= cap || spent.isEmpty {
+                spent.append((now, cost))
+                return
+            }
+            // Sleep until the oldest booking leaves the window, then re-check —
+            // the actor is reentrant, so several waiters race fairly for it.
+            let wait = max(0.5, window - now.timeIntervalSince(spent[0].at))
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        }
+    }
+}
+
+extension GmailClient {
+    /// Per-call cost from Gmail's usage-limits table.
+    static func cost(method: String, path: String) -> Int {
+        if path == "messages/send" { return 100 }
+        if path.hasPrefix("threads") { return 10 }        // get, list, modify
+        if path.hasPrefix("messages") { return 5 }        // get, list, attachments, trash
+        if path.hasPrefix("drafts") {
+            switch method {
+            case "POST": return 10
+            case "PUT": return 15
+            case "DELETE": return 10
+            default: return 5
+            }
+        }
+        if path.hasPrefix("history") { return 2 }
+        if path.hasPrefix("labels") { return method == "POST" ? 5 : 1 }
+        if path == "profile" { return 1 }
+        return 5
     }
 }
