@@ -78,7 +78,9 @@ public struct GmailClient: Sendable {
                 guard attempt <= 4 else {
                     throw MailError.http(code, String(data: data, encoding: .utf8) ?? "")
                 }
-                try await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 500_000_000))
+                // 2/4/8/16s: a per-minute quota 403 needs the window to roll
+                // over, and the old 1–8s series gave up inside it.
+                try await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 1_000_000_000))
             default:
                 throw MailError.http(code, String(data: data, encoding: .utf8) ?? "")
             }

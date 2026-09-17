@@ -72,7 +72,9 @@ public enum MailError: Error, LocalizedError {
         case .keychain(let s): return "Keychain error (\(s))"
         case .oauthFailed(let m): return "Sign-in failed: \(m)"
         case .notConfigured: return "Add your Google OAuth client ID first — click Add Account and follow the setup steps."
-        case .http(let code, let body): return "Gmail API error \(code): \(body)"
+        case .http(let code, let body):
+            if body.contains("rateLimitExceeded") { return "Gmail rate limit hit — will retry." }
+            return "Gmail API error \(code): \(body)"
         case .authRevoked(let m): return "Google signed this account out (\(m)) — reconnect it to keep syncing."
         case .noRefreshToken: return "Account needs to be re-added (no refresh token)."
         }

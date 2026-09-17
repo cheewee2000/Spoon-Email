@@ -321,7 +321,11 @@ final class AppModel: ObservableObject {
                     await self.syncEngine.repairInlineImagesPass(accounts: accounts)
                     await self.syncEngine.backfillPass(accounts: accounts)
                 }
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                // Gmail meters 6000 quota units per user per minute and a
+                // 300-thread chunk costs ~3000 (threads.get is 10). One chunk
+                // a minute leaves half the window for sync, saves and sends;
+                // at 10s the backfill alone drained it and draft saves 403'd.
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
             }
         }
     }
