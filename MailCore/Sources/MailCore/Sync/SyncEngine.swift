@@ -79,7 +79,7 @@ public actor SyncEngine {
                 if acct.historyId == nil {
                     // First contact: pin the history baseline before backfill
                     // starts so nothing arriving during it is missed.
-                    let client = GmailClient(accountId: acct.id, tokens: tokens)
+                    let client = GmailClient(accountId: acct.id, tokens: tokens, background: true)
                     let baseline = try await client.profile().historyId
                     try await db.writer.write { [id = acct.id] db in
                         try db.execute(sql: "UPDATE account SET historyId = ? WHERE id = ?",
@@ -218,7 +218,7 @@ public actor SyncEngine {
                 """, arguments: [accountId])
         }) ?? []
         guard !threadIds.isEmpty else { return }
-        let client = GmailClient(accountId: accountId, tokens: tokens)
+        let client = GmailClient(accountId: accountId, tokens: tokens, background: true)
         for threadId in threadIds {
             do {
                 let g = try await client.getThread(threadId)
@@ -253,7 +253,7 @@ public actor SyncEngine {
             openLabelIds[account.id] = id
             return
         }
-        let client = GmailClient(accountId: account.id, tokens: tokens)
+        let client = GmailClient(accountId: account.id, tokens: tokens, background: true)
         let labels = try await client.listLabels()
         let id: String
         if let existing = labels.first(where: { $0.name.caseInsensitiveCompare("Open") == .orderedSame }) {
@@ -360,7 +360,7 @@ public actor SyncEngine {
 
     private func incrementalSync(account: Account) async throws {
         guard let startId = account.historyId else { return }  // baseline set by syncAll
-        let client = GmailClient(accountId: account.id, tokens: tokens)
+        let client = GmailClient(accountId: account.id, tokens: tokens, background: true)
 
         var threadIds = Set<String>()
         var newHistoryId: String?

@@ -5,8 +5,8 @@ import Foundation
 public struct GmailClient: Sendable {
     public let accountId: String
     private let tokens: TokenManager
-    /// Backfill/repair traffic: waits at the lower quota line so it can never
-    /// crowd out a save, send or refresh.
+    /// Sync-engine traffic (backfill, repair, incremental, launch refetches):
+    /// waits at the lower quota line so it can never crowd out a user action.
     let background: Bool
     private static let base = "https://gmail.googleapis.com/gmail/v1/users/me/"
 
@@ -55,7 +55,7 @@ public struct GmailClient: Sendable {
         if !query.isEmpty { comps.queryItems = query }
         let url = comps.url!
 
-        await QuotaGate.shared.acquire(cost: Self.cost(method: method, path: path),
+        await QuotaGate.shared.acquire(account: accountId, cost: Self.cost(method: method, path: path),
                                        cap: background ? QuotaGate.backgroundCap : QuotaGate.cap)
         var attempt = 0
         var forceRefresh = false
@@ -81,11 +81,12 @@ public struct GmailClient: Sendable {
             case 401 where attempt <= 2:
                 forceRefresh = true
             case 403, 429, 500...599:
-                guard attempt <= 4 else {
+                guard attempt <= 5 else {
                     throw MailError.http(code, String(data: data, encoding: .utf8) ?? "")
                 }
-                // 2/4/8/16s: a per-minute quota 403 needs the window to roll
-                // over, and the old 1–8s series gave up inside it.
+                // 2/4/8/16/32s (62s): a per-minute quota 403 needs the window
+                // to roll over. The gate can't see a just-quit process's or
+                // another device's spend, so the retry must outlast a window.
                 try await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 1_000_000_000))
             default:
                 throw MailError.http(code, String(data: data, encoding: .utf8) ?? "")
@@ -109,20 +110,22 @@ actor QuotaGate {
     static let cap = 4500
     static let backgroundCap = 2000
     private let window: TimeInterval = 60
-    private var spent: [(at: Date, cost: Int)] = []
+    /// The quota is per Gmail account, so each keeps its own ledger.
+    private var spent: [String: [(at: Date, cost: Int)]] = [:]
 
-    func acquire(cost: Int, cap: Int) async {
+    func acquire(account: String, cost: Int, cap: Int) async {
         while true {
             let now = Date()
-            spent.removeAll { now.timeIntervalSince($0.at) > window }
-            let total = spent.reduce(0) { $0 + $1.cost }
-            if total + cost <= cap || spent.isEmpty {
-                spent.append((now, cost))
+            spent[account, default: []].removeAll { now.timeIntervalSince($0.at) > window }
+            let ledger = spent[account] ?? []
+            let total = ledger.reduce(0) { $0 + $1.cost }
+            if total + cost <= cap || ledger.isEmpty {
+                spent[account, default: []].append((now, cost))
                 return
             }
             // Sleep until the oldest booking leaves the window, then re-check —
             // the actor is reentrant, so several waiters race fairly for it.
-            let wait = max(0.5, window - now.timeIntervalSince(spent[0].at))
+            let wait = max(0.5, window - now.timeIntervalSince(ledger[0].at))
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         }
     }
