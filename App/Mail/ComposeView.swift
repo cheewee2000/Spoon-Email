@@ -43,6 +43,11 @@ struct ComposeView: View {
     /// Set once the message is sent or explicitly saved/closed — the exit
     /// flush must not double-save behind it.
     @State private var closing = false
+    /// The save in flight, if any. Every write to Gmail queues behind it and
+    /// reads the draft ids only once it has reported them — a save that
+    /// started before the previous one returned would otherwise not know the
+    /// draft exists and create a second copy.
+    @State private var saveChain: Task<Void, Never>?
     /// Files dropped on the window, sent as regular (non-inline) attachments.
     @State private var files: [ComposeAttachment] = []
     @StateObject private var rich = RichTextController()
@@ -162,9 +167,8 @@ struct ComposeView: View {
                     .keyboardShortcut(.escape, modifiers: [])
                     .help("Close — keeps your progress as a draft (Esc)")
                 Button("Save draft") {
+                    save(force: true, quiet: false)
                     closing = true
-                    captureBody()
-                    model.saveDraft(draft)
                     close()
                 }
                 .buttonStyle(.textAction(CWT.ink2))
@@ -251,15 +255,24 @@ struct ComposeView: View {
 
     /// Saves silently when the content has changed since the last write —
     /// covers the 30 s tick, the red close button, and the sheet dismissing.
-    private func autosaveIfDirty() {
+    private func autosaveIfDirty() { save() }
+
+    /// Queues a write of the current content behind any save in flight.
+    /// `force` skips the dirty check (explicit Save draft).
+    private func save(force: Bool = false, quiet: Bool = true) {
         guard !closing else { return }
         let fp = fingerprint()
-        guard fp != savedFingerprint else { return }
+        guard force || fp != savedFingerprint else { return }
         savedFingerprint = fp
-        let snapshot = draft
-        Task {
-            if let ids = await model.persistDraft(snapshot, quiet: true) {
-                // Feed the ids back so the next tick updates in place; the
+        let content = draft
+        let prev = saveChain
+        saveChain = Task { @MainActor in
+            await prev?.value
+            var snapshot = content
+            snapshot.gmailDraftId = draft.gmailDraftId
+            snapshot.draftMessageId = draft.draftMessageId
+            if let ids = await model.persistDraft(snapshot, quiet: quiet) {
+                // Feed the ids back so the next write updates in place; the
                 // message id is new after every update.
                 draft.gmailDraftId = ids.draftId
                 draft.draftMessageId = ids.messageId
@@ -500,7 +513,16 @@ struct ComposeView: View {
     private func sendAt(_ date: Date?) {
         closing = true
         captureBody()
-        model.send(draft: draft, at: date)
+        let content = draft
+        let prev = saveChain
+        // Wait for any autosave in flight so the outbox retires the draft
+        // Gmail actually holds, not a message id that's about to go stale.
+        Task { @MainActor in
+            await prev?.value
+            var d = content
+            d.draftMessageId = draft.draftMessageId
+            model.send(draft: d, at: date)
+        }
         close()
     }
 
