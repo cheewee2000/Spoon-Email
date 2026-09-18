@@ -86,3 +86,26 @@ actor InlineImageCache {
         dir.appendingPathComponent(key)
     }
 }
+
+/// Remote images WebKit loaded but couldn't draw (see `GIFRepair`): fetched
+/// again here, re-encoded, and handed back as a `data:` URI for the page to
+/// swap in. Results — misses included — are remembered for the session.
+actor ImageRepair {
+    static let shared = ImageRepair()
+
+    private static let maxBytes = 20 * 1024 * 1024
+    /// No cookies: a newsletter image host has no business seeing the app's.
+    private let session = URLSession(configuration: .ephemeral)
+    private var done: [URL: String?] = [:]
+
+    func dataURI(for url: URL) async -> String? {
+        if let hit = done[url] { return hit }
+        var uri: String?
+        if let (data, _) = try? await session.data(from: url), data.count <= Self.maxBytes,
+           let fixed = GIFRepair.repaired(data) {
+            uri = "data:image/gif;base64,\(fixed.base64EncodedString())"
+        }
+        done[url] = uri
+        return uri
+    }
+}

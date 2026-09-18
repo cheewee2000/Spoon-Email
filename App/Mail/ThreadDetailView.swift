@@ -583,10 +583,32 @@ enum ThreadHTML {
           var imgs = d.images || [];
           for (var i = 0; i < imgs.length; i++) {
             if (!imgs[i].complete) {
-              imgs[i].addEventListener('load', function () { fit(f); });
-              imgs[i].addEventListener('error', function () { fit(f); });
+              imgs[i].addEventListener('load', function (e) { fit(f); reportBroken(e.target); });
+              imgs[i].addEventListener('error', function (e) { fit(f); reportBroken(e.target); });
+            } else {
+              reportBroken(imgs[i]);
             }
           }
+        }
+        // ImageIO rejects some valid GIFs outright (a huge, flat first frame
+        // is enough), so WebKit draws nothing where the picture should be.
+        // Hand those to the app, which re-encodes the frames it can decode
+        // and sends back a data: URI via repairImage().
+        var reported = {};
+        function reportBroken(img) {
+          var src = img.currentSrc || img.src;
+          if (!img.complete || img.naturalWidth > 0 || !/^https?:/.test(src) || reported[src]) return;
+          reported[src] = 1;
+          try { window.webkit.messageHandlers.sdhBrokenImage.postMessage(src); } catch (e) {}
+        }
+        function repairImage(src, uri) {
+          document.querySelectorAll('iframe.frame').forEach(function (f) {
+            var d = f.contentDocument;
+            if (!d) return;
+            [].forEach.call(d.images, function (img) {
+              if ((img.currentSrc || img.src) === src) { img.removeAttribute('srcset'); img.src = uri; }
+            });
+          });
         }
         function fit(f) {
           try {
@@ -945,6 +967,7 @@ struct MessageWebView: NSViewRepresentable {
         config.userContentController.add(coordinator, name: "sdhOpen")
         config.userContentController.add(coordinator, name: "sdhScroll")
         config.userContentController.add(coordinator, name: "sdhHScroll")
+        config.userContentController.add(coordinator, name: "sdhBrokenImage")
         // Parent page JS sizes the message iframes; email content itself
         // stays script-free (iframe sandbox has no allow-scripts).
         config.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -1017,6 +1040,7 @@ struct MessageWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.processPool = processPool
         config.userContentController.add(coordinator, name: "sdhOpen")
+        config.userContentController.add(coordinator, name: "sdhBrokenImage")
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         let view = ReaderWebView(frame: .zero, configuration: config)
         view.owner = coordinator
@@ -1279,6 +1303,17 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             atEnd = bits & 1 != 0
             atStart = bits & 2 != 0
             lastScrollY = (body?["y"] as? Double) ?? lastScrollY
+            return
+        }
+        if message.name == "sdhBrokenImage" {
+            guard let src = message.body as? String, let url = URL(string: src) else { return }
+            let view = message.webView
+            Task { @MainActor in
+                guard let uri = await ImageRepair.shared.dataURI(for: url), let view else { return }
+                let args = [src, uri].map { "\"" + $0.replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
+                _ = try? await view.evaluateJavaScript("repairImage(\(args[0]), \(args[1]))")
+            }
             return
         }
         #if os(macOS)
