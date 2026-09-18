@@ -20,6 +20,15 @@
 	<array>
 		<string>fetch</string>
 	</array>
+	<!-- Plenty of email still points its images at plain http:// (older
+	     newsletter hosts, animated GIFs especially). ATS blocks those inside
+	     WKWebView, leaving a hole; this lifts it for web content only — the
+	     app's own networking stays https-only. Applies on macOS too. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.cwandt.spoon.refresh</string>
