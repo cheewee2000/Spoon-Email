@@ -167,6 +167,7 @@ private struct HotkeyHoverTarget: ViewModifier {
 struct ThreadRow: View {
     let thread: MailThread
     let accountColor: Color
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -174,7 +175,8 @@ struct ThreadRow: View {
             // mail from different accounts is tellable at a glance.
             Rectangle()
                 .fill(accountColor)
-                .frame(width: 2)
+                .frame(width: thread.isUnread ? 2 : 1 / displayScale)
+                .frame(width: 2, alignment: .leading)
             Rectangle()
                 .fill(thread.isUnread ? accountColor : .clear)
                 .frame(width: 6, height: 6)
