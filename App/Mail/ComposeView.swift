@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS)
+import PhotosUI
+#endif
 import MailCore
 
 struct ComposeDraft: Identifiable {
@@ -50,6 +53,11 @@ struct ComposeView: View {
     @State private var saveChain: Task<Void, Never>?
     /// Files dropped on the window, sent as regular (non-inline) attachments.
     @State private var files: [ComposeAttachment] = []
+    #if os(iOS)
+    @State private var photoPicks: [PhotosPickerItem] = []
+    @State private var showPhotos = false
+    @State private var showFiles = false
+    #endif
     @StateObject private var rich = RichTextController()
     @FocusState private var focus: Field?
 
@@ -383,11 +391,41 @@ struct ComposeView: View {
                 .help("Add Link (⇧⌘K)")
             Button { rich.clearFormatting() } label: { Image(systemName: "eraser") }
                 .help("Clear formatting from the selection")
+            #if os(iOS)
+            Hairline(axis: .vertical).frame(height: 14)
+            Button { showPhotos = true } label: { Image(systemName: "photo") }
+            Button { showFiles = true } label: { Image(systemName: "paperclip") }
+            #endif
             Spacer()
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        #if os(iOS)
+        .photosPicker(isPresented: $showPhotos, selection: $photoPicks, matching: .images)
+        .onChange(of: photoPicks) { _, picks in
+            guard !picks.isEmpty else { return }
+            photoPicks = []
+            Task {
+                dropError = nil
+                for pick in picks {
+                    guard let data = try? await pick.loadTransferable(type: Data.self),
+                          let (payload, image) = InlineImageLoader.prepare(data: data, filename: "photo")
+                    else { dropError = "Couldn't read that photo."; continue }
+                    guard fits(payload) else { break }
+                    rich.insert(image: InlineImageAttachment(payload: payload, image: image))
+                }
+            }
+        }
+        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item],
+                      allowsMultipleSelection: true) { result in
+            guard let urls = try? result.get() else { return }
+            // Files app hands out security-scoped URLs; hold the scope for the read.
+            let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
+            _ = receiveFileURLs(urls)
+            scoped.forEach { $0.stopAccessingSecurityScopedResource() }
+        }
+        #endif
         .popover(isPresented: $showLinkPrompt) {
             VStack(alignment: .leading, spacing: 8) {
                 SectionLabel(text: "Link URL")
