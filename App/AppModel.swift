@@ -733,6 +733,7 @@ final class AppModel: ObservableObject {
     }
 
     func forward(_ thread: MailThread) {
+        Task {
         guard let last = lastMessage(in: thread) else { return }
         let subject = thread.subject.hasPrefix("Fwd:") ? thread.subject : "Fwd: \(thread.subject)"
         let header = """
@@ -749,10 +750,43 @@ final class AppModel: ObservableObject {
                 + ThreadHTML.escape(header).replacingOccurrences(of: "\n", with: "<br>")
                 + "</div><br>" + html
         }
+        let attachments = await forwardedAttachments(of: last, html: quotedHTML ?? "")
         draft = ComposeDraft(accountId: thread.accountId, subject: subject,
-                             body: "",
+                             body: "", attachments: attachments,
                              quotedText: header + "\n\n" + text,
                              quotedHTML: quotedHTML)
+        }
+    }
+
+    /// Every part of the forwarded message: images its HTML cites stay
+    /// inline under their original content id; the rest ride as files.
+    private func forwardedAttachments(of m: Message, html: String) async -> [ComposeAttachment] {
+        let parts: [Attachment] = (try? await db.writer.read { db in
+            try Attachment.fetchAll(
+                db,
+                sql: "SELECT * FROM attachment WHERE accountId = ? AND messageId = ?",
+                arguments: [m.accountId, m.id])
+        }) ?? []
+        guard !parts.isEmpty else { return [] }
+        let client = accountStore.client(for: m.accountId)
+        let bytes = (try? await client.downloadAttachments(messageId: m.id,
+                                                            partIds: parts.map(\.partId))) ?? [:]
+        var out: [ComposeAttachment] = []
+        var used = 0
+        for p in parts {
+            guard let data = bytes[p.partId], used + data.count <= ComposeAttachment.totalByteLimit
+            else { continue }
+            used += data.count
+            let inline = !p.contentId.isEmpty && html.contains("cid:\(p.contentId)")
+            out.append(ComposeAttachment(id: inline ? p.contentId : UUID().uuidString + "@spoon.local",
+                                         filename: p.filename, mimeType: p.mimeType,
+                                         data: data, isInline: inline))
+        }
+        if out.count < parts.count {
+            lastError = "\(parts.count - out.count) attachment(s) couldn't be forwarded "
+                + "(missing or over \(ComposeAttachment.totalByteLimit / 1_000_000) MB)."
+        }
+        return out
     }
 
     /// Opens the compose sheet pre-filled from an existing Gmail draft.

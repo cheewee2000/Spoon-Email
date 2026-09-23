@@ -485,7 +485,8 @@ struct ComposeView: View {
     /// Guards the message against outgrowing what Gmail will take. Counts what
     /// is already in the body, since images arrive one drop at a time.
     private func fits(_ candidate: ComposeAttachment) -> Bool {
-        let used = (RichHTML.attachments(in: richBody) + files).reduce(0) { $0 + $1.data.count }
+        let used = (RichHTML.attachments(in: richBody) + quotedInline + files)
+            .reduce(0) { $0 + $1.data.count }
         guard used + candidate.data.count <= ComposeAttachment.totalByteLimit else {
             dropError = "\(candidate.filename) would push the message past "
                 + "\(ComposeAttachment.totalByteLimit / 1_000_000) MB — it wasn't added."
@@ -498,7 +499,14 @@ struct ComposeView: View {
     private func captureBody() {
         draft.body = RichHTML.plainText(from: richBody)
         draft.bodyHTML = RichHTML.html(from: richBody)
-        draft.attachments = RichHTML.attachments(in: richBody) + files
+        draft.attachments = RichHTML.attachments(in: richBody) + quotedInline + files
+    }
+
+    /// Inline images the forwarded trail cites by cid — they live outside the
+    /// editor, so the body snapshot would otherwise drop them.
+    private var quotedInline: [ComposeAttachment] {
+        let quoted = draft.quotedHTML ?? ""
+        return draft.attachments.filter { $0.isInline && quoted.contains("cid:\($0.id)") }
     }
 
     private func quotedPreviewDoc(_ html: String) -> String {
