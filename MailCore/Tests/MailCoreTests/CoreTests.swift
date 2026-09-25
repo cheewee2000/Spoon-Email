@@ -114,9 +114,10 @@ final class CoreTests: XCTestCase {
         let raw = String(data: data, encoding: .utf8)!
 
         let html = "<div style=\"font-family:-apple-system,sans-serif;font-size:14px\">"
-            + "<div><b>bold</b> word</div></div><blockquote>earlier</blockquote>"
+            + "<div><b>bold</b> word</div></div>"
+            + "<div class=\"gmail_quote\"><blockquote>earlier</blockquote></div>"
         XCTAssertTrue(qpDecode(raw).contains(html),
-                      "HTML part must carry the composed rich text as-is")
+                      "HTML part must carry the rich text as-is, trail in Gmail's collapsible wrapper")
         XCTAssertTrue(qpDecode(raw).contains("bold word\n\n> earlier"),
                       "plain part must still be the plain body plus quote")
     }

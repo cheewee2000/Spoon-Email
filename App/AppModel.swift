@@ -944,7 +944,7 @@ final class AppModel: ObservableObject {
         let date = m.date.formatted(date: .abbreviated, time: .shortened)
         let attribution = ThreadHTML.escape("On \(date), \(m.fromName) <\(m.fromEmail)> wrote:")
         return "<div style=\"color:#555;font-size:12px;margin-top:12px\">\(attribution)</div>"
-            + "<blockquote style=\"border-left:2px solid #ccc;margin:6px 0 0;padding-left:10px\">\(html)</blockquote>"
+            + "<blockquote class=\"gmail_quote\" type=\"cite\" style=\"border-left:2px solid #ccc;margin:6px 0 0;padding-left:10px\">\(html)</blockquote>"
     }
 
     private func lastMessage(in thread: MailThread) -> Message? {

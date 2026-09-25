@@ -49,10 +49,12 @@ public enum MimeBuilder {
             + "</div>"
         // Quoted/forwarded trail: use the original HTML when we have it so
         // formatting survives; otherwise fall back to the plain-text quote.
+        // Wrapped in the class Gmail (and our own reader) folds away as
+        // "show quoted text"; Apple Mail folds the blockquote's type="cite".
         if let quotedHTML, !quotedHTML.isEmpty {
-            html += quotedHTML
+            html += "<div class=\"gmail_quote\">" + quotedHTML + "</div>"
         } else if !quotedText.isEmpty {
-            html += "<div style=\"color:#555\">"
+            html += "<div class=\"gmail_quote\" style=\"color:#555\">"
                 + escapeHTML(quotedText).replacingOccurrences(of: "\n", with: "<br>")
                 + "</div>"
         }
