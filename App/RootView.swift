@@ -49,6 +49,7 @@ struct RootView: View {
             }
             #endif
         }
+        .safeAreaInset(edge: .top, spacing: 0) { reauthBanner }
         .railHoverLabel()
         .cwtChrome()
         .onAppear {
@@ -182,6 +183,32 @@ struct RootView: View {
             }
         } message: {
             Text("Created in Gmail for \(model.accountStore.accounts.first { $0.id == model.newLabelPrompt?.thread.accountId }?.email ?? "this account").")
+        }
+    }
+
+    /// Stays up until the account is reconnected — a dead token otherwise
+    /// only showed as a rail badge and a status line that cleared itself.
+    @ViewBuilder private var reauthBanner: some View {
+        let dead = model.accountStore.accounts.filter { model.accountStore.needsReauth.contains($0.id) }
+        if !dead.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(dead) { account in
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(CWT.orange)
+                        Text("Google signed out \(account.email) — mail isn't syncing or sending.")
+                            .lineLimit(2)
+                        Spacer(minLength: 8)
+                        Button("Reconnect") { model.reconnect(account) }
+                            .buttonStyle(.textAction(CWT.ink))
+                    }
+                    .font(CWT.caption)
+                    .foregroundStyle(CWT.ink)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(CWT.paperWarm)
+                    Hairline()
+                }
+            }
         }
     }
 

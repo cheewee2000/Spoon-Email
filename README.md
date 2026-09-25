@@ -33,15 +33,21 @@ ID…"). One-time setup, ~5 min:
    new project (any name, e.g. `spoon`).
 2. **APIs & Services → Library** → search "Gmail API" → **Enable**.
 3. **APIs & Services → OAuth consent screen** → External → fill in the app name
-   and your email → **Audience: Testing** → add each Gmail address you'll connect
-   as a **Test user**.
+   and your email → **Publish app** so the audience reads **In production**.
+   Don't leave it in Testing: Google expires Testing-mode refresh tokens after
+   7 days, so every account would need reconnecting weekly. An unverified
+   production app shows a "Google hasn't verified this app" screen at sign-in
+   (Advanced → Go to…) — once per account, and no review is needed for
+   personal use.
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID** →
    Application type **iOS** → Bundle ID `com.cwandt.spoon` → Create.
 5. Copy the **client ID** (looks like `1234-abc.apps.googleusercontent.com`) and
    paste it into the setup sheet in the app. (A native client ID isn't a secret —
    PKCE, no client secret — which is why ours can live in this repo.)
 
-No verification review is needed while the OAuth client stays in Testing mode.
+Google signing an account out (revoked, password changed, or a Testing-mode
+client's 7-day expiry) shows a banner across the top of the window with a
+**Reconnect** button; syncing and sending stop for that account until then.
 
 Scheduled sends fire while the app is running (on iOS: while the app is open —
 if a scheduled time passes while the app is closed, the send happens the next

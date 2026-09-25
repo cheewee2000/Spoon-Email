@@ -24,7 +24,7 @@ struct ClientSetupSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 step(1, "Open [console.cloud.google.com](https://console.cloud.google.com) and create a project (any name).")
                 step(2, "**APIs & Services → Library** → enable the **Gmail API**.")
-                step(3, "**OAuth consent screen** → External → **Audience: Testing** → add each Gmail address you'll connect as a **Test user**.")
+                step(3, "**OAuth consent screen** → External → fill in the name and email → **Publish app** (Audience: In production). Leaving it in Testing signs you out every 7 days. Sign-in will show a \"Google hasn't verified this app\" screen — Advanced → Go to… — once per account.")
                 step(4, "**Credentials → Create credentials → OAuth client ID** → application type **iOS** → bundle ID `com.cwandt.spoon`.")
                 step(5, "Copy the client ID and paste it here:")
             }

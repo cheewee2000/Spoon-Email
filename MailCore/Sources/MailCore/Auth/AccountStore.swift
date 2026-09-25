@@ -19,6 +19,11 @@ public final class AccountStore: ObservableObject {
         self.config = config
         self.tokens = TokenManager(config: config)
         load()
+        Task { [tokens] in
+            await tokens.setAuthFailureHandler { id in
+                Task { @MainActor [weak self] in self?.markNeedsReauth(id) }
+            }
+        }
     }
 
     public func load() {
