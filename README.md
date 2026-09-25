@@ -22,12 +22,13 @@ Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
 Spoon Email talks to the Gmail API directly with a Google OAuth client — your
 mail never flows through anyone else's infrastructure. The app ships with CW&T's
-client ID, which Google keeps in Testing mode: it only admits addresses on our
-test-user list, so if you're one of those, just click **Add Account** and sign in.
+client ID, published but not Google-verified: any Google account can sign in,
+and the first sign-in shows a "Google hasn't verified this app" screen — click
+**Advanced → Go to superduperhuman** once per account. Tokens don't expire.
 
-Everyone else uses their own free client (right-click / long-press
-**Add Account…** → **Use Your Own Google Client ID…**, or ⌘K → "Google Client
-ID…"). One-time setup, ~5 min:
+If you'd rather not go through an unverified client, use your own free one
+(right-click / long-press **Add Account…** → **Use Your Own Google Client
+ID…**, or ⌘K → "Google Client ID…"). One-time setup, ~5 min:
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create a
    new project (any name, e.g. `spoon`).

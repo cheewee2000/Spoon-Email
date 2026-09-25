@@ -18,7 +18,7 @@ struct ClientSetupSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Google OAuth client")
                 .font(CWT.title)
-            Text("Spoon Email ships with CW&T's Google client, which only works for addresses on our test-user list. Anyone else can use their own free client — your mail never touches anyone else's server either way. One-time setup, about 5 minutes:")
+            Text("Spoon Email ships with CW&T's Google client, which any Google account can use (sign-in shows a \"Google hasn't verified this app\" screen once — Advanced → Go to). If you'd rather use your own free client — your mail never touches anyone else's server either way. One-time setup, about 5 minutes:")
                 .font(CWT.font(12))
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
