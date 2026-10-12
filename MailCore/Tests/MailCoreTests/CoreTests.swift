@@ -6,6 +6,15 @@ final class CoreTests: XCTestCase {
 
     // MARK: - Address lists
 
+    func testBodyDeclaredLatin1ButActuallyUTF8DecodesAsUTF8() {
+        // A sender labels UTF-8 bytes as iso-8859-1 (common). The bytes win.
+        let utf8 = Data("14\" × 12\"".utf8)
+        XCTAssertEqual(MimeParser.decodeBody(utf8, contentType: "text/plain; charset=iso-8859-1"), "14\" × 12\"")
+        // Real Latin-1 bytes (0xD7 = ×) still honor the declaration.
+        let latin = Data([0x31, 0x34, 0x20, 0xD7, 0x20, 0x31, 0x32])
+        XCTAssertEqual(MimeParser.decodeBody(latin, contentType: "text/plain; charset=iso-8859-1"), "14 × 12")
+    }
+
     func testSplitKeepsQuotedCommasTogether() {
         XCTAssertEqual(
             AddressList.split("\"Doe, John\" <j@x.com>, jo@y.com, \"Ann\" <a@z.com>"),

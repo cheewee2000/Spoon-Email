@@ -111,7 +111,15 @@ public enum MimeParser {
     /// bytes are lost. The Latin-1 path survives for bodies that are
     /// actually legacy-encoded: declared, or undeclared but so far from
     /// valid UTF-8 that replacement characters would litter the text.
+    ///
+    /// The declared charset is a hint, not a fact: plenty of senders label
+    /// UTF-8 bytes as iso-8859-1, which turned every "×" into "Ã" plus a
+    /// control byte. Bytes that pass a strict UTF-8 decode are UTF-8 — a
+    /// legacy-encoded body with accents essentially never forms valid
+    /// multi-byte sequences by accident — so that check runs first and the
+    /// declared legacy charset only catches what fails it.
     static func decodeBody(_ data: Data, contentType: String) -> String {
+        if let strict = String(data: data, encoding: .utf8) { return strict }
         let ct = contentType.lowercased()
         if ct.contains("windows-1252") || ct.contains("cp1252") {
             return String(data: data, encoding: .windowsCP1252) ?? String(decoding: data, as: UTF8.self)
@@ -119,7 +127,6 @@ public enum MimeParser {
         if ct.contains("iso-8859-1") || ct.contains("latin1") {
             return String(data: data, encoding: .isoLatin1) ?? String(decoding: data, as: UTF8.self)
         }
-        if let strict = String(data: data, encoding: .utf8) { return strict }
         let lossy = String(decoding: data, as: UTF8.self)   // U+FFFD per bad byte
         let bad = lossy.unicodeScalars.lazy.filter { $0.value == 0xFFFD }.count
         if bad > 8, bad * 100 > lossy.unicodeScalars.count, // frequent AND numerous: not UTF-8 at all
