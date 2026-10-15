@@ -162,6 +162,7 @@ public enum MimeParser {
             fromEmail: from.email,
             toList: header(g.payload, "To"),
             ccList: header(g.payload, "Cc"),
+            bccList: header(g.payload, "Bcc"),
             date: Date(timeIntervalSince1970: dateMs / 1000),
             snippet: decodeEntities(g.snippet ?? ""),
             bodyHTML: html,

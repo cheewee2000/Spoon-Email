@@ -73,6 +73,9 @@ public struct Message: Codable, Sendable, Hashable, FetchableRecord, Persistable
     public var fromEmail: String
     public var toList: String        // comma-joined
     public var ccList: String
+    /// Only ever non-empty on your own sent copy — Gmail keeps the Bcc
+    /// header there and strips it everywhere else.
+    public var bccList: String = ""
     public var date: Date
     public var snippet: String
     public var bodyHTML: String?

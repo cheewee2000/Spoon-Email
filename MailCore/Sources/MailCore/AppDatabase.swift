@@ -334,6 +334,9 @@ public final class AppDatabase: Sendable {
                 """)
             try db.execute(sql: "CREATE INDEX index_thread_blocked_date ON thread(lastDate) WHERE isBlocked = 1")
         }
+        m.registerMigration("v17") { db in
+            try db.execute(sql: "ALTER TABLE message ADD COLUMN bccList TEXT NOT NULL DEFAULT ''")
+        }
         return m
     }
 }

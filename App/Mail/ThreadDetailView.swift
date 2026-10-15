@@ -310,7 +310,7 @@ enum ThreadHTML {
                 <span class="addr">&lt;\(escape(m.fromEmail))&gt;</span>
                 \(draftBadge)
                 <span class="date">\(escape(date))</span>
-                <div class="to">to \(escape(m.toList))</div>
+                \(recipientLine("to", m.toList))\(recipientLine("cc", m.ccList))\(recipientLine("bcc", m.bccList))
                 <div class="peek">\(escape(m.snippet))</div>
               </div>
               <div class="mbody">
@@ -833,6 +833,11 @@ enum ThreadHTML {
         }
         out += ns.substring(from: pos)
         return out
+    }
+
+    /// One "to/cc/bcc <addresses>" header line, or nothing when that field is empty.
+    static func recipientLine(_ label: String, _ list: String) -> String {
+        list.isEmpty ? "" : "<div class=\"to\">\(label) \(escape(list))</div>"
     }
 
     static func escape(_ s: String) -> String {
