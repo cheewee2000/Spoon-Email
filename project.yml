@@ -8,9 +8,12 @@ options:
 packages:
   MailCore:
     path: MailCore
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.10.0"
 settings:
   base:
-    MARKETING_VERSION: 0.60.1
+    MARKETING_VERSION: 0.61.0
     CURRENT_PROJECT_VERSION: 1
     # Swift 5 language mode: GRDB 6 ValueObservation closures crash under
     # Swift 6 dynamic actor-isolation checking (they run on DB queues).
@@ -29,6 +32,8 @@ targets:
         buildPhase: resources
     dependencies:
       - package: MailCore
+      - package: Sparkle
+        destinationFilters: [macOS]
       - target: SpoonWidgets
         platformFilter: iOS
     settings:
@@ -38,7 +43,8 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: L6DVQR8JB9
-        ENABLE_HARDENED_RUNTIME: NO
+        # Notarization (and so Sparkle updates on a clean Mac) needs it.
+        ENABLE_HARDENED_RUNTIME: YES
         # Both together: Xcode merges the INFOPLIST_KEY_* settings below into
         # App/Info.plist, which carries the keys that have no build-setting
         # equivalent (UIBackgroundModes, BGTaskSchedulerPermittedIdentifiers).

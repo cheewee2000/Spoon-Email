@@ -1,9 +1,15 @@
 import SwiftUI
 import MailCore
+#if os(macOS)
+import Sparkle
+#endif
 
 @main
 struct SpoonApp: App {
     @StateObject private var model = AppModel.shared
+    #if os(macOS)
+    private let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    #endif
 
     init() {
         CWT.registerFonts()
@@ -43,6 +49,9 @@ struct SpoonApp: App {
                     .keyboardShortcut("r")
             }
             #if os(macOS)
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.updater.checkForUpdates() }
+            }
             // Lands in the Edit menu, where Find belongs.
             CommandGroup(after: .textEditing) {
                 Button("Find") { model.focusSearch() }

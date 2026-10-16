@@ -3,7 +3,7 @@
 A fast, keyboard-first Gmail client for macOS and iOS in the spirit of Superhuman.
 Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
-**Version 0.14.1**
+**Version 0.61.0**
 
 ![Spoon Email screenshot](Screenshot%202026-08-12%20at%208.10.49%20AM.png)
 
@@ -54,6 +54,13 @@ Scheduled sends fire while the app is running (on iOS: while the app is open —
 if a scheduled time passes while the app is closed, the send happens the next
 time you open it).
 
+## Installing (macOS)
+
+Grab the latest `Spoon-x.y.z-macOS.zip` from
+[Releases](https://github.com/cheewee2000/Spoon-Email/releases), unzip, drag to
+Applications. It's notarized, and updates arrive in-app via Sparkle
+(**Spoon → Check for Updates…**, or automatically).
+
 ## Keyboard shortcuts (macOS)
 
 `j`/`k` next/prev · `e` archive · `r` reply · `a` reply all · `f` forward ·
@@ -74,6 +81,14 @@ Or from the CLI:
 xcodebuild -project "Spoon Email.xcodeproj" -scheme "Spoon Email" \
   -destination 'platform=macOS' build
 ```
+
+## Releasing (macOS)
+
+Bump `MARKETING_VERSION` in `project.yml`, commit, then `Tools/mac/release.sh`:
+Developer ID archive → notarize → zip → Sparkle appcast on
+experiments.cwandt.com/spoon/mac → GitHub release. The appcast is signed with
+the Sparkle EdDSA key in the login keychain (`generate_keys -p` prints the
+public half that lives in `App/Info.plist`).
 
 ## Architecture
 

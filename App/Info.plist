@@ -29,6 +29,14 @@
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
+	<!-- Sparkle (macOS only). The public key pairs with the private one in
+	     the login keychain that Tools/release.sh signs each zip with. -->
+	<key>SUFeedURL</key>
+	<string>https://www.experiments.cwandt.com/spoon/mac/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>IsZ2LtddRqNHFHsp6U40Gw/A6sWIJO4m5xJYr1r4qic=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.cwandt.spoon.refresh</string>
