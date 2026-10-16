@@ -123,21 +123,43 @@ public enum MailboxFilter: Hashable, Sendable {
 }
 
 public enum MailSearch {
-    /// "foo bar" → "\"foo\"* \"bar\"*" (prefix-match every term, implicit AND)
+    /// Gmail-style field operators → FTS5 column names.
+    static let operators = [("from:", "sender"), ("to:", "recipients"), ("subject:", "subject")]
+
+    /// "sarah vacuum form" → "\"sarah\"* \"vacuum\"* \"form\"*" (prefix-match
+    /// every term, implicit AND). `from:sarah` / `to:sarah` / `subject:x`
+    /// pin a term to that one field: `sender: "sarah"*`.
     public static func ftsQuery(_ raw: String) -> String? {
-        let tokens = raw
+        let terms: [String] = raw
             .components(separatedBy: .whitespacesAndNewlines)
-            .map { $0.replacingOccurrences(of: "\"", with: "") }
-            .filter { !$0.isEmpty }
-        guard !tokens.isEmpty else { return nil }
-        return tokens.map { "\"\($0)\"*" }.joined(separator: " ")
+            .compactMap { token in
+                var word = token
+                var column: String?
+                for (op, col) in operators where word.lowercased().hasPrefix(op) {
+                    column = col
+                    word = String(word.dropFirst(op.count))
+                }
+                word = word.replacingOccurrences(of: "\"", with: "")
+                guard !word.isEmpty else { return nil }
+                let term = "\"\(word)\"*"
+                return column.map { "\($0): \(term)" } ?? term
+            }
+        guard !terms.isEmpty else { return nil }
+        return terms.joined(separator: " ")
     }
 
-    /// Threads matching an FTS5 query, newest first.
+    /// Threads matching an FTS5 query, best match first (ties newest first).
     ///
     /// Drives from the FTS index rather than a correlated `EXISTS` against
     /// `thread`: the latter makes SQLite scan every thread and re-run MATCH
     /// per row, which never finishes on a large mailbox.
+    ///
+    /// Ranking is bm25 with a hit in subject/sender/recipients weighted well
+    /// above one in the body, so a thread *with* Sarah outranks a newsletter
+    /// that merely mentions a Sarah. The inner `ORDER BY rank LIMIT` is what
+    /// lets bm25() run at all: without it the planner probes the index by
+    /// rowid from the `message` side and refuses the function. A thread's
+    /// rank is its best message's.
     ///
     /// The index is contentless and keyed by `message.rowid`, so the hit
     /// list joins through `message` to reach the thread.
@@ -145,12 +167,14 @@ public enum MailSearch {
         try MailThread.fetchAll(db, sql: """
             SELECT t.* FROM thread t
             JOIN (
-                SELECT DISTINCT m.accountId, m.threadId
-                FROM message_fts
-                JOIN message m ON m.rowid = message_fts.rowid
-                WHERE message_fts MATCH ?
+                SELECT m.accountId, m.threadId, MIN(h.rank) AS rank
+                FROM (SELECT rowid AS rid, bm25(message_fts, 4.0, 8.0, 8.0, 1.0) AS rank
+                      FROM message_fts WHERE message_fts MATCH ?
+                      ORDER BY rank LIMIT 2000) h
+                JOIN message m ON m.rowid = h.rid
+                GROUP BY m.accountId, m.threadId
             ) f ON f.accountId = t.accountId AND f.threadId = t.id
-            ORDER BY t.lastDate DESC LIMIT \(limit)
+            ORDER BY f.rank, t.lastDate DESC LIMIT \(limit)
             """, arguments: [match])
     }
 }

@@ -580,6 +580,51 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(searchable.map(\.id), ["t1"], "the index must track the change too")
     }
 
+    /// `sarah vacuum form` must put the thread *with* Sarah above a newsletter
+    /// that merely mentions one, and `from:` must drop the newsletter outright.
+    func testSearchRanksPeopleAboveMentions() async throws {
+        let db = try AppDatabase.inMemory()
+        try await db.writer.write { db in
+            try Account(id: "acc1", email: "me@example.com").insert(db)
+        }
+        let engine = SyncEngine(db: db, tokens: TokenManager(
+            config: GoogleOAuthConfig(clientID: "x.apps.googleusercontent.com")))
+        func gThread(id: String, from: String, body: String, date: String) throws -> GThread {
+            let json = """
+            {"id":"\(id)","messages":[
+              {"id":"\(id)m","threadId":"\(id)","labelIds":["INBOX"],"snippet":"s",
+               "internalDate":"\(date)",
+               "payload":{"partId":"","mimeType":"text/plain",
+                          "headers":[{"name":"From","value":"\(from)"},
+                                     {"name":"Subject","value":"hi"}],
+                          "body":{"size":1,"data":"\(Data(body.utf8).base64EncodedString())"}}}]}
+            """
+            return try JSONDecoder().decode(GThread.self, from: Data(json.utf8))
+        }
+        // Newer, so date order would put it first; relevance must not.
+        try await engine.store(gThread: try gThread(
+            id: "news", from: "Digest <news@example.com>",
+            body: "Sarah said hello. Elsewhere, vacuum forming tips, and much more filler text here.",
+            date: "1700000001000"), accountId: "acc1")
+        try await engine.store(gThread: try gThread(
+            id: "sarah", from: "Sarah Zhao <sarah@example.com>",
+            body: "Can we vacuum form the enclosure?",
+            date: "1700000000000"), accountId: "acc1")
+
+        XCTAssertEqual(MailSearch.ftsQuery("from:sarah vacuum form"),
+                       "sender: \"sarah\"* \"vacuum\"* \"form\"*")
+
+        let ranked = try await db.writer.read { db in
+            try MailSearch.threads(db, match: MailSearch.ftsQuery("sarah vacuum form")!)
+        }
+        XCTAssertEqual(ranked.map(\.id), ["sarah", "news"])
+
+        let fromOnly = try await db.writer.read { db in
+            try MailSearch.threads(db, match: MailSearch.ftsQuery("from:sarah vacuum form")!)
+        }
+        XCTAssertEqual(fromOnly.map(\.id), ["sarah"])
+    }
+
     /// Archived = out of the inbox, but not trashed, spam, or an unsent
     /// draft — and never something still sitting in Open.
     func testArchivedMailbox() async throws {

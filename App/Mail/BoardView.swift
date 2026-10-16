@@ -93,7 +93,7 @@ struct BoardView: View {
             }
         }
         .navigationTitle(focused?.title ?? "All Mailboxes")
-        .searchable(text: $searchText, prompt: "Search all mail")
+        .searchable(text: $searchText, prompt: "Search all mail (from: to: subject:)")
         .searchFocused(searchFocused)
         .toolbar {
             ToolbarItem {
