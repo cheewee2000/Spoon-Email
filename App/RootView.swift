@@ -253,13 +253,28 @@ struct RootView: View {
     #if os(macOS)
     private func releaseSearchIfClickedOutside(_ event: NSEvent) {
         guard let window = event.window, window === NSApp.keyWindow,
-              let editor = window.firstResponder as? NSTextView,
-              let field = editor.delegate as? NSSearchField,
-              field.window === window else { return }
+              let field = focusedSearchField() else { return }
         let inField = field.convert(field.bounds, to: nil).contains(event.locationInWindow)
         guard !inField else { return }
-        window.makeFirstResponder(nil)
+        endSearch()
+    }
+
+    /// The toolbar search field, if it's the one holding the keyboard.
+    private func focusedSearchField() -> NSSearchField? {
+        guard let window = NSApp.keyWindow,
+              let editor = window.firstResponder as? NSTextView,
+              let field = editor.delegate as? NSSearchField,
+              field.window === window else { return nil }
+        return field
+    }
+
+    /// Clears the search and lets go of the field. Both halves matter: the
+    /// binding alone leaves the caret in the field, and everything typed
+    /// afterwards — j, k, e — lands there instead of in the shortcuts.
+    private func endSearch() {
+        searchText = ""
         searchFocused = false
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
     #endif
 
@@ -268,10 +283,15 @@ struct RootView: View {
         guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else { return false }
         guard model.draft == nil, !model.showPalette, !model.showBlocked,
               model.unsubscribe == nil else { return false }
-        // Escape backs out toward the board from wherever you are — including
-        // out of the search field, which is the one place it beats the text
-        // editors below to the keystroke (it's how you abandon a search).
+        // Escape: a search in progress ends first (text cleared, field let
+        // go, so single-key shortcuts work again); the next press backs out
+        // toward the board. This is the one place Escape beats the text
+        // editors below to the keystroke.
         if event.keyCode == 53 {
+            if !searchText.isEmpty || focusedSearchField() != nil {
+                endSearch()
+                return true
+            }
             guard model.mailbox != nil else { return false }
             model.escape()
             return true
