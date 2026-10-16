@@ -57,6 +57,9 @@ targets:
         INFOPLIST_KEY_NSContactsUsageDescription: "Shows the photo your address book already has for the people who write to you."
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         SWIFT_STRICT_CONCURRENCY: minimal
+        # XcodeGen writes the iOS runpath for a multiplatform target; a Mac
+        # bundle keeps its frameworks (Sparkle) in Contents/Frameworks.
+        LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]: "$(inherited) @executable_path/../Frameworks"
         # App Group for the widget snapshot — iOS only; the Mac build has no
         # widgets and no provisioning for the group.
         CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: App/Spoon-iOS.entitlements
