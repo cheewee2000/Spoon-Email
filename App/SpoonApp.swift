@@ -32,13 +32,27 @@ struct SpoonApp: App {
         .defaultSize(width: 1200, height: 800)
         #endif
         .commands {
-            // Disabled while composing so ⌘Z falls through the responder
-            // chain to the text editor's own undo instead of un-archiving
-            // something behind the sheet.
+            // ⌘Z un-archives in the inbox. In the composer's window it has
+            // to reach the text view's own undo stack instead — and that only
+            // ever happens through a menu item sending undo: down the
+            // responder chain, which replacing this group had removed.
             CommandGroup(replacing: .undoRedo) {
-                Button(model.undoTitle) { model.undo() }
-                    .keyboardShortcut("z", modifiers: .command)
-                    .disabled(!model.canUndo || model.draft != nil)
+                Button(model.draft == nil ? model.undoTitle : "Undo") {
+                    #if os(macOS)
+                    if ComposeWindowHost.shared.owns(NSApp.keyWindow) {
+                        NSApp.sendAction(Selector(("undo:")), to: nil, from: nil)
+                        return
+                    }
+                    #endif
+                    model.undo()
+                }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!model.canUndo && model.draft == nil)
+                #if os(macOS)
+                Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(model.draft == nil)
+                #endif
             }
             CommandGroup(replacing: .newItem) {
                 Button("New Message") { model.compose() }
