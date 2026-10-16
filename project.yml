@@ -14,7 +14,8 @@ packages:
 settings:
   base:
     MARKETING_VERSION: 0.61.0
-    CURRENT_PROJECT_VERSION: 1
+    # Tracks the marketing version so Sparkle (which compares CFBundleVersion) sees each release as newer.
+    CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
     # Swift 5 language mode: GRDB 6 ValueObservation closures crash under
     # Swift 6 dynamic actor-isolation checking (they run on DB queues).
     SWIFT_VERSION: 5.0
