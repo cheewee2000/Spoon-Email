@@ -14,6 +14,9 @@ final class ComposeWindowHost: NSObject, NSWindowDelegate {
     static let shared = ComposeWindowHost()
 
     private var window: NSWindow?
+    /// Whether this is the composer's window — keystrokes there belong to
+    /// the draft, not the inbox shortcuts.
+    func owns(_ candidate: NSWindow?) -> Bool { candidate != nil && candidate === window }
     /// Called when the window closes on its own (the red button), so the app
     /// can drop the draft it was showing.
     var onWindowClosed: (() -> Void)?

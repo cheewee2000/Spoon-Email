@@ -252,16 +252,17 @@ struct RootView: View {
 
     #if os(macOS)
     private func releaseSearchIfClickedOutside(_ event: NSEvent) {
-        guard let window = event.window, window === NSApp.keyWindow,
-              let field = focusedSearchField() else { return }
+        // The clicked window, not the key one: a click that brings the inbox
+        // back from behind the composer arrives before it becomes key.
+        guard let field = focusedSearchField(in: event.window) else { return }
         let inField = field.convert(field.bounds, to: nil).contains(event.locationInWindow)
         guard !inField else { return }
         endSearch()
     }
 
     /// The toolbar search field, if it's the one holding the keyboard.
-    private func focusedSearchField() -> NSSearchField? {
-        guard let window = NSApp.keyWindow,
+    private func focusedSearchField(in window: NSWindow? = NSApp.keyWindow) -> NSSearchField? {
+        guard let window,
               let editor = window.firstResponder as? NSTextView,
               let field = editor.delegate as? NSSearchField,
               field.window === window else { return nil }
@@ -281,7 +282,10 @@ struct RootView: View {
     #if os(macOS)
     private func handleGlobalKey(_ event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else { return false }
-        guard model.draft == nil, !model.showPalette, !model.showBlocked,
+        // The composer lives in its own window on the Mac; a draft being
+        // open must not freeze the inbox window's shortcuts behind it.
+        guard !ComposeWindowHost.shared.owns(event.window),
+              !model.showPalette, !model.showBlocked,
               model.unsubscribe == nil else { return false }
         // Escape: a search in progress ends first (text cleared, field let
         // go, so single-key shortcuts work again); the next press backs out
