@@ -241,8 +241,9 @@ struct RootView: View {
         // The toolbar search field holds first responder through clicks in
         // the list and the reader's web view, so the caret stays blinking up
         // there and every keystroke keeps typing into it. A click anywhere
-        // outside the field ends the search session; the click itself still
-        // goes through.
+        // outside the field lets go of the keyboard — the results stay, so
+        // the click can land on one of them; the click itself still goes
+        // through.
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
             releaseSearchIfClickedOutside(event)
             return event
@@ -257,7 +258,11 @@ struct RootView: View {
         guard let field = focusedSearchField(in: event.window) else { return }
         let inField = field.convert(field.bounds, to: nil).contains(event.locationInWindow)
         guard !inField else { return }
-        endSearch()
+        // Keyboard only: clearing the text here would swap the filtered list
+        // for the mailbox under the pointer, and the row being clicked would
+        // vanish before it could be selected. Escape still clears.
+        searchFocused = false
+        field.window?.makeFirstResponder(nil)
     }
 
     /// The toolbar search field, if it's the one holding the keyboard.
