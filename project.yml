@@ -13,7 +13,7 @@ packages:
     from: "2.10.0"
 settings:
   base:
-    MARKETING_VERSION: 0.61.3
+    MARKETING_VERSION: 0.61.4
     # Tracks the marketing version so Sparkle (which compares CFBundleVersion) sees each release as newer.
     CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
     # Swift 5 language mode: GRDB 6 ValueObservation closures crash under

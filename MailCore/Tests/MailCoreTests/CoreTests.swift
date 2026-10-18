@@ -601,7 +601,7 @@ final class CoreTests: XCTestCase {
             """
             return try JSONDecoder().decode(GThread.self, from: Data(json.utf8))
         }
-        // Newer, so date order would put it first; relevance must not.
+        // Newer, so it comes first: results are chronological.
         try await engine.store(gThread: try gThread(
             id: "news", from: "Digest <news@example.com>",
             body: "Sarah said hello. Elsewhere, vacuum forming tips, and much more filler text here.",
@@ -617,7 +617,7 @@ final class CoreTests: XCTestCase {
         let ranked = try await db.writer.read { db in
             try MailSearch.threads(db, match: MailSearch.ftsQuery("sarah vacuum form")!)
         }
-        XCTAssertEqual(ranked.map(\.id), ["sarah", "news"])
+        XCTAssertEqual(ranked.map(\.id), ["news", "sarah"])
 
         let fromOnly = try await db.writer.read { db in
             try MailSearch.threads(db, match: MailSearch.ftsQuery("from:sarah vacuum form")!)

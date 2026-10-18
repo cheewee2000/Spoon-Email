@@ -154,12 +154,11 @@ public enum MailSearch {
     /// `thread`: the latter makes SQLite scan every thread and re-run MATCH
     /// per row, which never finishes on a large mailbox.
     ///
-    /// Ranking is bm25 with a hit in subject/sender/recipients weighted well
-    /// above one in the body, so a thread *with* Sarah outranks a newsletter
-    /// that merely mentions a Sarah. The inner `ORDER BY rank LIMIT` is what
-    /// lets bm25() run at all: without it the planner probes the index by
-    /// rowid from the `message` side and refuses the function. A thread's
-    /// rank is its best message's.
+    /// Results are newest first. bm25 (subject/sender/recipients weighted well
+    /// above body) only picks which 2000 hits make the cut; the inner
+    /// `ORDER BY rank LIMIT` is also what lets bm25() run at all: without it
+    /// the planner probes the index by rowid from the `message` side and
+    /// refuses the function.
     ///
     /// The index is contentless and keyed by `message.rowid`, so the hit
     /// list joins through `message` to reach the thread.
@@ -167,14 +166,13 @@ public enum MailSearch {
         try MailThread.fetchAll(db, sql: """
             SELECT t.* FROM thread t
             JOIN (
-                SELECT m.accountId, m.threadId, MIN(h.rank) AS rank
+                SELECT DISTINCT m.accountId, m.threadId
                 FROM (SELECT rowid AS rid, bm25(message_fts, 4.0, 8.0, 8.0, 1.0) AS rank
                       FROM message_fts WHERE message_fts MATCH ?
                       ORDER BY rank LIMIT 2000) h
                 JOIN message m ON m.rowid = h.rid
-                GROUP BY m.accountId, m.threadId
             ) f ON f.accountId = t.accountId AND f.threadId = t.id
-            ORDER BY f.rank, t.lastDate DESC LIMIT \(limit)
+            ORDER BY t.lastDate DESC LIMIT \(limit)
             """, arguments: [match])
     }
 }
