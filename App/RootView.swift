@@ -82,8 +82,8 @@ struct RootView: View {
         }
         #endif
         .composeWindow()
-        #if !os(macOS)
         .quickLookPreview($model.previewURL)
+        #if !os(macOS)
         .sheet(item: $model.draft) { draft in
             ComposeView(draft: draft)
                 .environmentObject(model)
