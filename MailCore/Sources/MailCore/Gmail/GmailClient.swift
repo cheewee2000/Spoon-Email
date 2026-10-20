@@ -71,7 +71,15 @@ public struct GmailClient: Sendable {
             forceRefresh = false
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let data: Data, resp: URLResponse
+            do {
+                (data, resp) = try await URLSession.shared.data(for: req)
+            } catch let e as URLError where attempt <= 5 && Self.retryable(e, method: method) {
+                // A blip (wake from sleep, Wi-Fi handoff) used to fail the
+                // call outright — an autosave tick surfaced it as an error.
+                try await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 1_000_000_000))
+                continue
+            }
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             switch code {
             case 200...299:
@@ -91,6 +99,22 @@ public struct GmailClient: Sendable {
             default:
                 throw MailError.http(code, String(data: data, encoding: .utf8) ?? "")
             }
+        }
+    }
+
+    /// Network failures worth another try. A request that never left the
+    /// machine is always safe to resend; one that timed out or dropped
+    /// mid-flight may have landed, so only idempotent methods resend it —
+    /// a second POST drafts/ would leave a duplicate draft behind.
+    static func retryable(_ e: URLError, method: String) -> Bool {
+        switch e.code {
+        case .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost,
+             .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff:
+            return true
+        case .timedOut, .networkConnectionLost, .secureConnectionFailed:
+            return method != "POST"
+        default:
+            return false
         }
     }
 }
