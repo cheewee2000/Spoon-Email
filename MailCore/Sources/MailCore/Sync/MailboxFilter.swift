@@ -112,8 +112,23 @@ public enum MailboxFilter: Hashable, Sendable {
             return try MailThread.fetchAll(
                 db, sql: "SELECT t.* FROM thread t WHERE t.isBlocked = 1 \(order)")
         case .spam:
-            return try MailThread.fetchAll(db, sql: "SELECT t.* \(plainJoin) \(order)",
-                                           arguments: [GmailLabels.spam])
+            // One email sent to several of your addresses can land in spam on
+            // one account and the inbox on another — hide the spam copy of
+            // anything Unified already shows, matched by Message-ID. The
+            // CROSS JOIN pins the walk to the (small) inbox side; left to the
+            // planner it read every message in each account (~1 min).
+            return try MailThread.fetchAll(db, sql: """
+                SELECT t.* \(plainJoin)
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM message sm
+                    WHERE sm.accountId = t.accountId AND sm.threadId = t.id
+                      AND sm.messageIdHeader IN (
+                        SELECT om.messageIdHeader FROM thread it
+                        CROSS JOIN message om ON om.accountId = it.accountId AND om.threadId = it.id
+                        WHERE \(unifiedWhere.replacingOccurrences(of: "t.", with: "it."))
+                          AND om.messageIdHeader <> ''))
+                \(order)
+                """, arguments: [GmailLabels.spam])
         case .account(let id):
             return try MailThread.fetchAll(
                 db, sql: "SELECT t.* FROM thread t WHERE t.isInbox = 1 AND t.accountId = ? AND t.isOpen = 0 \(order)",
