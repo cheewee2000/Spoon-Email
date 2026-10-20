@@ -1,4 +1,5 @@
 import SwiftUI
+import QuickLook
 import MailCore
 
 struct RootView: View {
@@ -82,6 +83,7 @@ struct RootView: View {
         #endif
         .composeWindow()
         #if !os(macOS)
+        .quickLookPreview($model.previewURL)
         .sheet(item: $model.draft) { draft in
             ComposeView(draft: draft)
                 .environmentObject(model)

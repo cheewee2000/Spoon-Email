@@ -155,7 +155,11 @@ struct ThreadDetailView: View {
                 threadKey: thread.key,
                 onAttachment: { messageId, partId in
                     if let att = detail.attachments[messageId]?.first(where: { $0.partId == partId }) {
-                        model.download(att)
+                        #if os(macOS)
+                        // ⌥-click still saves to Downloads; a plain click previews.
+                        if NSEvent.modifierFlags.contains(.option) { model.download(att); return }
+                        #endif
+                        model.preview(att)
                     }
                 },
                 onEditDraft: { messageId in
@@ -281,7 +285,7 @@ enum ThreadHTML {
             }.map { (a: Attachment) -> String in
                 let size = ByteCountFormatter.string(fromByteCount: Int64(a.size), countStyle: .file)
                 return """
-                <a class="chip" href="sdh-attach://att/\(a.messageId)/\(a.partId)">📎 \(escape(a.filename)) <span class="chipsize">\(size)</span></a>
+                <a class="chip" title="Click to preview · ⌥-click to save" href="sdh-attach://att/\(a.messageId)/\(a.partId)">📎 \(escape(a.filename)) <span class="chipsize">\(size)</span></a>
                 """
             }.joined(separator: " ")
             let draftBadge = m.isDraft

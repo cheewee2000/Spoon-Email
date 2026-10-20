@@ -54,6 +54,8 @@ final class AppModel: ObservableObject {
 
     @Published var lastError: String?
     @Published var syncStatus: String?
+    /// Attachment shown in Quick Look; RootView binds it to .quickLookPreview.
+    @Published var previewURL: URL?
     @Published var draft: ComposeDraft?
     @Published var undoToast: (id: String, until: Date, draft: ComposeDraft)?
     /// The mailbox filling the window, or `nil` for the board — the
@@ -1184,6 +1186,29 @@ final class AppModel: ObservableObject {
             Task { try? await self.syncEngine.addBlock(pattern: rule.pattern, kind: rule.kind) }
         }
         Task { await syncEngine.removeBlock(rule) }
+    }
+
+    /// Fetches into a per-attachment temp dir (keeps the real filename, so
+    /// Quick Look picks the right viewer) and opens it in place — no trip
+    /// through Downloads just to look at a PDF.
+    func preview(_ attachment: Attachment) {
+        Task {
+            flash("Opening \(attachment.filename)…")
+            do {
+                let client = accountStore.client(for: attachment.accountId)
+                let data = try await client.downloadAttachment(
+                    messageId: attachment.messageId, partId: attachment.partId)
+                let dir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("preview-\(attachment.messageId)-\(attachment.partId)", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let url = dir.appendingPathComponent(attachment.filename)
+                try data.write(to: url)
+                syncStatus = nil
+                previewURL = url
+            } catch {
+                lastError = "Preview failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     func download(_ attachment: Attachment) {
