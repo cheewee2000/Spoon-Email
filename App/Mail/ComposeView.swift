@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 import PhotosUI
 #endif
 import MailCore
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 struct ComposeDraft: Identifiable {
     let id = UUID()
@@ -575,7 +578,16 @@ struct ComposeView: View {
         captureBody()
         if !skipSubjectCheck && draft.subject.trimmingCharacters(in: .whitespaces).isEmpty {
             pendingSendDate = date
-            suggestedSubject = Self.suggestSubject(from: draft.body)
+            let fallback = Self.suggestSubject(from: draft.body)
+            suggestedSubject = fallback
+            // Swap in the on-device model's subject when it lands, unless
+            // the field has been edited meanwhile.
+            let body = draft.body
+            Task { @MainActor in
+                if let s = await Self.modelSubject(for: body), suggestedSubject == fallback {
+                    suggestedSubject = s
+                }
+            }
             showSubjectPrompt = true
             return
         }
@@ -604,6 +616,25 @@ struct ComposeView: View {
         guard sentence.count > 60 else { return sentence }
         let cut = sentence.prefix(60)
         return String(cut[..<(cut.lastIndex(of: " ") ?? cut.endIndex)]) + "…"
+    }
+
+    /// A subject from Apple Intelligence's on-device model, or nil where it
+    /// isn't available (older OS, unsupported device, turned off).
+    static func modelSubject(for body: String) async -> String? {
+        #if canImport(FoundationModels)
+        guard #available(macOS 26, iOS 26, *),
+              SystemLanguageModel.default.availability == .available,
+              !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let session = LanguageModelSession(instructions: """
+            Write a short email subject line (under 8 words) for the email the user gives you. \
+            Reply with the subject only: no quotes, no "Subject:" prefix, no trailing period.
+            """)
+        guard let reply = try? await session.respond(to: String(body.prefix(4000))) else { return nil }
+        let subject = reply.content.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\"")))
+        return subject.isEmpty ? nil : subject
+        #else
+        return nil
+        #endif
     }
 
     private func next(hour: Int, forceTomorrow: Bool = false) -> Date {
