@@ -39,6 +39,9 @@ struct ComposeView: View {
     @State private var linkURL = ""
     @State private var isDropTargeted = false
     @State private var dropError: String?
+    @State private var showSubjectPrompt = false
+    @State private var suggestedSubject = ""
+    @State private var pendingSendDate: Date?
     /// Fingerprint of the content most recently written to Gmail; autosave
     /// only fires when the composer has drifted from it. Starts as the
     /// opening content so an untouched draft never saves.
@@ -212,6 +215,18 @@ struct ComposeView: View {
         #if os(macOS)
         .frame(minWidth: 560, minHeight: 440)
         #endif
+        .alert("No Subject", isPresented: $showSubjectPrompt) {
+            TextField("Subject", text: $suggestedSubject)
+            Button("Send") {
+                draft.subject = suggestedSubject
+                sendAt(pendingSendDate)
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Send Without Subject") { sendAt(pendingSendDate, skipSubjectCheck: true) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Add a subject before sending?")
+        }
         .onDrop(of: [.image, .fileURL, .data], isTargeted: $isDropTargeted) { providers in
             receive(providers)
         }
@@ -556,9 +571,15 @@ struct ComposeView: View {
         """
     }
 
-    private func sendAt(_ date: Date?) {
-        closing = true
+    private func sendAt(_ date: Date?, skipSubjectCheck: Bool = false) {
         captureBody()
+        if !skipSubjectCheck && draft.subject.trimmingCharacters(in: .whitespaces).isEmpty {
+            pendingSendDate = date
+            suggestedSubject = Self.suggestSubject(from: draft.body)
+            showSubjectPrompt = true
+            return
+        }
+        closing = true
         let content = draft
         let prev = saveChain
         // Wait for any autosave in flight so the outbox retires the draft
@@ -570,6 +591,19 @@ struct ComposeView: View {
             model.send(draft: d, at: date)
         }
         close()
+    }
+
+    /// First line of the body that isn't a greeting, cut to ~60 chars at a word.
+    static func suggestSubject(from body: String) -> String {
+        let lines = body.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        // "Hi Sam," / "Hello," on its own line says nothing about the message.
+        let line = lines.first { !($0.hasSuffix(",") && $0.count < 30) } ?? ""
+        let sentence = line.split(separator: ".", maxSplits: 1).first.map(String.init) ?? line
+        guard sentence.count > 60 else { return sentence }
+        let cut = sentence.prefix(60)
+        return String(cut[..<(cut.lastIndex(of: " ") ?? cut.endIndex)]) + "…"
     }
 
     private func next(hour: Int, forceTomorrow: Bool = false) -> Date {
