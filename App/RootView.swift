@@ -143,6 +143,7 @@ struct RootView: View {
         }
         // Widget taps: spoon://mailbox/<name> or spoon://thread/<account>/<id>.
         .onOpenURL { url in
+            if url.scheme?.lowercased() == "mailto" { return model.compose(mailto: url) }
             guard url.scheme == SpoonURL.scheme else { return }
             let parts = url.pathComponents.filter { $0 != "/" }
             switch url.host {

@@ -73,5 +73,42 @@ struct SpoonApp: App {
             }
             #endif
         }
+        #if os(macOS)
+        Settings {
+            SettingsView()
+        }
+        #endif
     }
 }
+
+#if os(macOS)
+struct SettingsView: View {
+    private let mailto = URL(string: "mailto:")!
+    @State private var isDefault = false
+
+    var body: some View {
+        HStack {
+            Text(isDefault ? "Spoon is your default email app." : "Mail links open another app.")
+                .font(CWT.font(12))
+            Spacer()
+            Button("Make Spoon the Default") {
+                // macOS asks the user to confirm before switching.
+                Task {
+                    try? await NSWorkspace.shared.setDefaultApplication(
+                        at: Bundle.main.bundleURL, toOpenURLsWithScheme: "mailto")
+                    refresh()
+                }
+            }
+            .disabled(isDefault)
+        }
+        .padding(20)
+        .frame(width: 460)
+        .onAppear(perform: refresh)
+    }
+
+    private func refresh() {
+        isDefault = NSWorkspace.shared.urlForApplication(toOpen: mailto)
+            .flatMap { Bundle(url: $0)?.bundleIdentifier } == Bundle.main.bundleIdentifier
+    }
+}
+#endif

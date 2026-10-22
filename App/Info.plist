@@ -15,6 +15,15 @@
 				<string>spoon</string>
 			</array>
 		</dict>
+		<!-- Lets Settings make Spoon the Mac's default mail app. -->
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.cwandt.spoon.mailto</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mailto</string>
+			</array>
+		</dict>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

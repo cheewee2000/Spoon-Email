@@ -705,6 +705,21 @@ final class AppModel: ObservableObject {
         draft = ComposeDraft(accountId: account.id, to: address)
     }
 
+    /// A mailto: link from another app, once Spoon is the default mail app.
+    func compose(mailto url: URL) {
+        guard let account = defaultComposeAccount else {
+            lastError = "Add an account first."
+            return
+        }
+        let c = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let q = { (name: String) in
+            c?.queryItems?.first { $0.name.lowercased() == name }?.value ?? ""
+        }
+        draft = ComposeDraft(accountId: account.id,
+                             to: c?.path.removingPercentEncoding ?? "",
+                             cc: q("cc"), bcc: q("bcc"), subject: q("subject"))
+    }
+
     func reply(to thread: MailThread, all: Bool) {
         Task {
             guard let last = lastMessage(in: thread) else { return }
