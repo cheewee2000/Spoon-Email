@@ -5,8 +5,6 @@ Multiple Gmail accounts, one unified inbox. No calendar, no AI.
 
 **Version 0.61.0**
 
-![Spoon Email screenshot](Screenshot%202026-08-12%20at%208.10.49%20AM.png)
-
 ## Features
 
 - Multiple Gmail accounts → unified inbox, with a multi-column board view
