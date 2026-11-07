@@ -523,6 +523,23 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(ftsIds, ["m1", "m2"], "search index must drop the sent draft too")
     }
 
+    /// The per-launch draft refresh finds its threads through the DRAFT label
+    /// (an index probe), not by reading every message in the account.
+    func testDraftThreadsAreFoundByLabel() async throws {
+        let db = try AppDatabase.inMemory()
+        try await db.writer.write { db in
+            try Account(id: "acc1", email: "me@example.com").insert(db)
+            try Account(id: "acc2", email: "you@example.com").insert(db)
+            for (acct, thread, label) in [("acc1", "t1", "DRAFT"), ("acc1", "t2", "INBOX"),
+                                          ("acc2", "t3", "DRAFT")] {
+                try db.execute(sql: "INSERT INTO thread_label (accountId, threadId, labelId) VALUES (?, ?, ?)",
+                               arguments: [acct, thread, label])
+            }
+        }
+        let ids = try await db.writer.read { try SyncEngine.draftThreadIds($0, accountId: "acc1") }
+        XCTAssertEqual(ids, ["t1"])
+    }
+
     /// `store` skips a thread whose fingerprint hasn't moved. The skip must
     /// never swallow a real change — a label flipping is exactly the case
     /// that would otherwise leave mail frozen in the wrong state forever.

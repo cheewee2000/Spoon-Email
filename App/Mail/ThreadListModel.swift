@@ -131,6 +131,7 @@ final class ThreadListModel: ObservableObject {
     }
 
     private func startObservation(db: AppDatabase) {
+        searchDebounce?.cancel()
         cancellable?.cancel()
         pendingApply?.cancel()
         pendingApply = nil
@@ -192,9 +193,24 @@ final class ThreadListModel: ObservableObject {
         }
     }
 
-    /// Live FTS5 search across all accounts.
+    private var searchDebounce: Task<Void, Never>?
+
+    /// Live FTS5 search across all accounts. Waits for a pause in the typing:
+    /// every keystroke used to start its own query, a short prefix ("a", "in")
+    /// takes seconds on a million messages, and a query can't be cancelled
+    /// once SQLite is running it — so typing a word tied up the reader pool
+    /// with searches nobody would see.
     func observeSearch(db: AppDatabase, query: String) {
         searching = true
+        searchDebounce?.cancel()
+        searchDebounce = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            self?.startSearch(db: db, query: query)
+        }
+    }
+
+    private func startSearch(db: AppDatabase, query: String) {
         cancellable?.cancel()
         guard let match = Self.ftsQuery(query) else {
             threads = []
@@ -233,10 +249,11 @@ final class ThreadDetailModel: ObservableObject {
     /// because the render runs off the main actor.
     private let inlineImages = InlineImageMap()
     private var inlineTask: Task<Void, Never>?
-    /// Sender address → `data:` URI, filled in as the lookups land. Same
-    /// arrangement as the inline images: shared with the render, which runs
-    /// off the main actor.
-    private let avatars = AvatarMap()
+    /// Sender address → `data:` URI, filled in as the lookups land. One map
+    /// for every thread, the prefetch included: a page prefetched without
+    /// avatars differed from the live render, so every advance reloaded the
+    /// preloaded web view the moment it was adopted.
+    private let avatars = AvatarMap.shared
     private var avatarTask: Task<Void, Never>?
     private var threadKey = ""
 
@@ -245,8 +262,8 @@ final class ThreadDetailModel: ObservableObject {
     /// Pages for threads recently shown or about to be (the selection's
     /// neighbors, prefetched) — so archive-and-advance paints the next email
     /// immediately instead of waiting out a fetch and a megabyte-scale
-    /// render. A prefetched page may lack inline images and avatars; the
-    /// live observation fills those in once the thread is actually shown.
+    /// render. A prefetched page may lack inline (`cid:`) images; the live
+    /// observation fills those in once the thread is actually shown.
     private static var pageCache: [String: String] = [:]
     private static var pageOrder: [String] = []
     /// Key → whether a preloaded web view was asked for. A dictionary rather
@@ -254,6 +271,17 @@ final class ThreadDetailModel: ObservableObject {
     private static var prefetching: [String: Bool] = [:]
 
     static func cachedPage(for key: String) -> String? { pageCache[key] }
+
+    /// A thread's attachments, message-first — the CROSS JOIN pins that
+    /// order. Left to the planner it walked every attachment in the account
+    /// and probed `message` for each: 230ms on a 215k-attachment account,
+    /// paid on each open, each neighbor prefetch, and every sync commit
+    /// while a thread is up. This way round it's ~1ms.
+    private static let attachmentsSQL = """
+        SELECT a.* FROM message m
+        CROSS JOIN attachment a ON a.accountId = m.accountId AND a.messageId = m.id
+        WHERE m.accountId = ? AND m.threadId = ?
+        """
 
     static func cachePage(_ html: String, for key: String) {
         guard !html.isEmpty else { return }
@@ -280,27 +308,30 @@ final class ThreadDetailModel: ObservableObject {
         prefetching[key] = warmView
         let accountId = thread.accountId
         let threadId = thread.id
+        let attachmentsSQL = Self.attachmentsSQL
         // The reader is usually one keystroke from needing this page —
         // utility priority let a heavy render lose the race with an
         // archive-and-advance and hand the reader a blank pane.
         Task.detached(priority: .userInitiated) {
-            let page = try? await db.writer.read { db -> String in
+            let rows = try? await db.writer.read { db -> ([Message], [Attachment]) in
                 let messages = try Message.fetchAll(
                     db,
                     sql: "SELECT * FROM message WHERE accountId = ? AND threadId = ? ORDER BY date",
                     arguments: [accountId, threadId])
                 let attachments = try Attachment.fetchAll(
-                    db,
-                    sql: """
-                    SELECT a.* FROM attachment a
-                    JOIN message m ON m.accountId = a.accountId AND m.id = a.messageId
-                    WHERE m.accountId = ? AND m.threadId = ?
-                    """,
-                    arguments: [accountId, threadId])
-                return ThreadHTML.render(messages: messages,
-                                         attachments: Dictionary(grouping: attachments, by: \.messageId))
+                    db, sql: attachmentsSQL, arguments: [accountId, threadId])
+                return (messages, attachments)
             }
-            await MainActor.run {
+            // Same avatars the live render will use, so the page the reader
+            // adopts is the page it would have built — no reload on arrival.
+            var page: String?
+            if let (messages, attachments) = rows {
+                _ = await AvatarMap.shared.resolve(sendersOf: messages)
+                page = ThreadHTML.render(messages: messages,
+                                         attachments: Dictionary(grouping: attachments, by: \.messageId),
+                                         avatars: AvatarMap.shared.snapshot())
+            }
+            await MainActor.run { [page] in
                 let wantsView = prefetching.removeValue(forKey: key) ?? false
                 if let page {
                     cachePage(page, for: key)
@@ -334,12 +365,12 @@ final class ThreadDetailModel: ObservableObject {
             inlineTask?.cancel()
             inlineImages.clear()
             avatarTask?.cancel()
-            avatars.clear()
             messages = []
             attachments = [:]
             html = Self.cachedPage(for: thread.key) ?? ""
         }
         let client = accounts.client(for: accountId)
+        let attachmentsSQL = Self.attachmentsSQL
         let inlineImages = self.inlineImages
         let avatars = self.avatars
         // Fetch, then dedupe, then render: every sync commit touches the
@@ -352,13 +383,7 @@ final class ThreadDetailModel: ObservableObject {
                 sql: "SELECT * FROM message WHERE accountId = ? AND threadId = ? ORDER BY date",
                 arguments: [accountId, threadId])
             let attachments = try Attachment.fetchAll(
-                db,
-                sql: """
-                SELECT a.* FROM attachment a
-                JOIN message m ON m.accountId = a.accountId AND m.id = a.messageId
-                WHERE m.accountId = ? AND m.threadId = ?
-                """,
-                arguments: [accountId, threadId])
+                db, sql: attachmentsSQL, arguments: [accountId, threadId])
             return (messages, Dictionary(grouping: attachments, by: \.messageId))
         }
         .removeDuplicates(by: ==)
@@ -404,25 +429,11 @@ final class ThreadDetailModel: ObservableObject {
     /// have none) cost nothing — the store answers those from its cache.
     private func fetchAvatars(messages: [Message], attachments: [String: [Attachment]],
                               key: String) {
-        let wanted = Set(messages.map { $0.fromEmail.lowercased() })
-            .filter { !$0.isEmpty && !avatars.has($0) }
-        guard !wanted.isEmpty else { return }
-
         let map = avatars
+        guard map.missing(sendersOf: messages) else { return }
         avatarTask?.cancel()
         avatarTask = Task { [weak self] in
-            var landed = false
-            for email in wanted {
-                if Task.isCancelled { return }
-                guard let uri = await AvatarStore.shared.dataURI(for: email) else {
-                    // Remembered as a miss so a later render doesn't re-ask.
-                    map.set(email: email, uri: nil)
-                    continue
-                }
-                map.set(email: email, uri: uri)
-                landed = true
-            }
-            guard landed, !Task.isCancelled, let self else { return }
+            guard await map.resolve(sendersOf: messages), !Task.isCancelled, let self else { return }
             self.publish(await self.rerender(messages: messages, attachments: attachments),
                          for: key)
         }
@@ -525,6 +536,30 @@ final class InlineImageMap: @unchecked Sendable {
 /// A stored `nil` is a sender that hasn't got a picture, which is worth
 /// remembering: it's what stops the render from asking again.
 final class AvatarMap: @unchecked Sendable {
+    // ponytail: never evicted — one data: URI per sender seen this session
+    // (AvatarStore's own memory cache is unbounded the same way); add an LRU
+    // if the reader's footprint ever matters.
+    static let shared = AvatarMap()
+
+    private func unanswered(_ messages: [Message]) -> Set<String> {
+        Set(messages.map { $0.fromEmail.lowercased() }).filter { !$0.isEmpty && !has($0) }
+    }
+
+    func missing(sendersOf messages: [Message]) -> Bool { !unanswered(messages).isEmpty }
+
+    /// Looks up every sender not answered yet (a miss is remembered, so a
+    /// later render doesn't re-ask). True if any picture landed.
+    func resolve(sendersOf messages: [Message]) async -> Bool {
+        var landed = false
+        for email in unanswered(messages) {
+            if Task.isCancelled { break }
+            let uri = await AvatarStore.shared.dataURI(for: email)
+            set(email: email, uri: uri)
+            if uri != nil { landed = true }
+        }
+        return landed
+    }
+
     private var storage: [String: String?] = [:]
     private var _version = 0
     private let lock = NSLock()
@@ -548,11 +583,5 @@ final class AvatarMap: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         storage[email] = .some(uri)
         if uri != nil { _version += 1 }
-    }
-
-    func clear() {
-        lock.lock(); defer { lock.unlock() }
-        storage = [:]
-        _version += 1
     }
 }

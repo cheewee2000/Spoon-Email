@@ -337,6 +337,12 @@ public final class AppDatabase: Sendable {
         m.registerMigration("v17") { db in
             try db.execute(sql: "ALTER TABLE message ADD COLUMN bccList TEXT NOT NULL DEFAULT ''")
         }
+        m.registerMigration("v18") { db in
+            // The inline-image repair asks each account for its unrepaired
+            // threads once per launch — and, long since finished, read the
+            // account's every thread (5s on 500k) to learn there are none.
+            try db.execute(sql: "CREATE INDEX index_thread_cid_unrepaired ON thread(accountId) WHERE cidRepaired = 0")
+        }
         return m
     }
 }

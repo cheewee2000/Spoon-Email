@@ -36,6 +36,11 @@ struct UnsubscribeSession: Identifiable {
 }
 
 @MainActor
+final class SyncStatus: ObservableObject {
+    @Published var text: String?
+}
+
+@MainActor
 final class AppModel: ObservableObject {
     /// One instance per process. The iOS background-refresh handler runs in
     /// launches where no window ever appears, and it needs the same database,
@@ -53,7 +58,15 @@ final class AppModel: ObservableObject {
     let order = SidebarOrder()
 
     @Published var lastError: String?
-    @Published var syncStatus: String?
+    /// Its own object, not @Published here: the 20s poll changes it once per
+    /// account plus a clear, and each change re-evaluated every view that
+    /// observes AppModel (all ten board columns and their rows) to redraw
+    /// one line of the sidebar footer.
+    let status = SyncStatus()
+    var syncStatus: String? {
+        get { status.text }
+        set { if status.text != newValue { status.text = newValue } }
+    }
     /// Attachment shown in Quick Look; RootView binds it to .quickLookPreview.
     @Published var previewURL: URL?
     @Published var draft: ComposeDraft?
@@ -138,6 +151,9 @@ final class AppModel: ObservableObject {
             .tracking { db in
                 try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM thread WHERE isOpen = 1 AND isUnread = 1") ?? 0
             }
+            // Every commit to `thread` re-delivers this, and assigning an
+            // unchanged count still publishes — a full redraw per synced thread.
+            .removeDuplicates()
             .start(in: db.writer, scheduling: .async(onQueue: .main)) { _ in
             } onChange: { [weak self] count in
                 self?.openUnreadCount = count
@@ -638,16 +654,18 @@ final class AppModel: ObservableObject {
     /// Warm the reader's page cache for the threads next to `thread` in the
     /// active list, so e / j / k land on an already-rendered page.
     func prefetchNeighbors(of thread: MailThread) {
-        let threads = activeList?.threads ?? []
+        // A row mid-collapse is the thread just archived: still in the array,
+        // but nobody is going back to it — preloading it spent a web view
+        // load on the main thread right as the next email slid in.
+        let collapsing = activeList?.collapsing ?? []
+        let threads = (activeList?.threads ?? []).filter { !collapsing.contains($0.key) }
         guard let idx = threads.firstIndex(where: { $0.key == thread.key }) else { return }
+        // Each gets a fully loaded offscreen web view, +2 included: a second
+        // quick archive lands before a preload started on arrival can finish.
         for offset in [1, -1, 2] {
             let i = idx + offset
             if threads.indices.contains(i) {
-                // The immediate neighbors get a fully loaded offscreen web
-                // view (an advance adopts it already painted); +2 stays an
-                // HTML-only warm-up.
-                ThreadDetailModel.prefetch(db: db, thread: threads[i],
-                                           warmView: abs(offset) == 1)
+                ThreadDetailModel.prefetch(db: db, thread: threads[i], warmView: true)
             }
         }
     }

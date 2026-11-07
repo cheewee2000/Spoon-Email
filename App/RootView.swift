@@ -531,10 +531,6 @@ struct RootView: View {
         #endif
     }
 
-    private var statusLine: String {
-        model.syncStatus
-            ?? "v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")"
-    }
 
     /// Logo, sync state, and the width toggle. Narrow, the status has nowhere
     /// to go, so the logo carries it on hover; wide, it's just written out.
@@ -543,11 +539,13 @@ struct RootView: View {
         if sidebarExpanded {
             HStack(spacing: 8) {
                 logo
-                Text(statusLine)
-                    .font(CWT.caption)
-                    .foregroundStyle(CWT.ink3)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                StatusLine(status: model.status) { line in
+                    Text(line)
+                        .font(CWT.caption)
+                        .foregroundStyle(CWT.ink3)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 Spacer(minLength: 4)
                 expandToggle
             }
@@ -556,7 +554,7 @@ struct RootView: View {
         } else {
             VStack(spacing: 8) {
                 expandToggle
-                logo.railTitle(statusLine)
+                StatusLine(status: model.status) { line in logo.railTitle(line) }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
@@ -575,6 +573,18 @@ struct RootView: View {
         .buttonStyle(.plain)
         .help(sidebarExpanded ? "Collapse Sidebar (⌥⌘S)" : "Expand Sidebar (⌥⌘S)")
         .keyboardShortcut("s", modifiers: [.option, .command])
+    }
+}
+
+/// The one view that watches the sync status (falling back to the version
+/// number when idle), so a status change redraws this and nothing else.
+private struct StatusLine<Content: View>: View {
+    @ObservedObject var status: SyncStatus
+    @ViewBuilder let content: (String) -> Content
+
+    var body: some View {
+        content(status.text
+                ?? "v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
     }
 }
 

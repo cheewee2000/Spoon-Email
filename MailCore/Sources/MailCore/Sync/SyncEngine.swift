@@ -204,6 +204,18 @@ public actor SyncEngine {
 
     private var draftsRepaired: Set<String> = []
 
+    /// Threads holding a draft, by their DRAFT label (what the Drafts mailbox
+    /// lists) — a handful of rows off the label index. Asking `message` for
+    /// `isDraft = 1` read every message in the account to find them: 34s per
+    /// launch on an 850k-message account. The `+` keeps the planner off the
+    /// primary key, which would walk all of the account's labels instead.
+    static func draftThreadIds(_ db: Database, accountId: String) throws -> [String] {
+        try String.fetchAll(db, sql: """
+            SELECT threadId FROM thread_label
+            WHERE labelId = ? AND +accountId = ? LIMIT 50
+            """, arguments: [GmailLabels.draft, accountId])
+    }
+
     /// Once per launch, re-fetch every thread that holds a local draft.
     /// Gmail's history feed doesn't reliably report draft deletions, so a
     /// draft that was sent or discarded elsewhere can linger locally; the
@@ -212,10 +224,7 @@ public actor SyncEngine {
         guard !draftsRepaired.contains(accountId) else { return }
         draftsRepaired.insert(accountId)
         let threadIds = (try? await db.writer.read { db in
-            try String.fetchAll(db, sql: """
-                SELECT DISTINCT threadId FROM message
-                WHERE accountId = ? AND isDraft = 1 LIMIT 50
-                """, arguments: [accountId])
+            try Self.draftThreadIds(db, accountId: accountId)
         }) ?? []
         guard !threadIds.isEmpty else { return }
         let client = GmailClient(accountId: accountId, tokens: tokens, background: true)
