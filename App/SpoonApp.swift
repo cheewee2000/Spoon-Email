@@ -13,6 +13,10 @@ struct SpoonApp: App {
 
     init() {
         CWT.registerFonts()
+        #if os(macOS)
+        // Same reason as handlesExternalEvents below: a tab is a second window.
+        NSWindow.allowsAutomaticWindowTabbing = false
+        #endif
         #if os(iOS)
         CWT.applyAppearance()
         #endif
@@ -27,6 +31,11 @@ struct SpoonApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                // One window, always: a mailto: link or widget tap would
+                // otherwise open a second one on the same AppModel, and only
+                // one window's reader follows the selection — archive with e
+                // in the other and the old email stays put.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         }
         #if os(macOS)
         .defaultSize(width: 1200, height: 800)

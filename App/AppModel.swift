@@ -673,19 +673,8 @@ final class AppModel: ObservableObject {
     /// Archive the selection and advance to the next thread (Superhuman "e").
     func archiveSelected(in threads: [MailThread]) {
         guard let sel = selectedThread else { return }
-        let idx = threads.firstIndex { $0.key == sel.key }
+        advanceReader(past: sel, in: threads)
         archive(sel)
-        if let idx {
-            if idx + 1 < threads.count {
-                readerSlideForward = true
-                withAnimation(CWT.nav) { selectedThread = threads[idx + 1] }
-            } else if idx > 0 {
-                readerSlideForward = false
-                withAnimation(CWT.nav) { selectedThread = threads[idx - 1] }
-            } else {
-                withAnimation(CWT.nav) { selectedThread = nil }
-            }
-        }
     }
 
     // MARK: - Compose
@@ -1135,15 +1124,18 @@ final class AppModel: ObservableObject {
     private func archiveAfterUnsubscribe(_ session: UnsubscribeSession, flashText: String) {
         let thread = session.thread
         let threads = activeList?.threads ?? []
-        archive(thread)
         advanceReader(past: thread, in: threads)
+        archive(thread)
         unsubscribe = nil
         flash(flashText)
     }
 
-    /// Slides the reader to the neighbor of a thread that just left the list.
-    /// `threads` is the list as it stood before the row left, so the neighbor
-    /// math still has the old order.
+    /// Slides the reader to the neighbor of a thread that is about to leave
+    /// the list. Call it BEFORE the archive: the row's collapse animation
+    /// (`hideEverywhere`) followed by this animated selection change in the
+    /// same event made SwiftUI drop the reader's update about one time in
+    /// three — the list moved on and the reader kept the archived email.
+    /// Selection first, collapse second, and it never does.
     private func advanceReader(past thread: MailThread, in threads: [MailThread]) {
         guard selectedThread?.key == thread.key,
               let idx = threads.firstIndex(where: { $0.key == thread.key }) else { return }
@@ -1200,8 +1192,8 @@ final class AppModel: ObservableObject {
                         }
                     }
                 }
-                ThreadListModel.hideEverywhere(thread.key)
                 advanceReader(past: thread, in: threads)
+                ThreadListModel.hideEverywhere(thread.key)
                 flash("Blocked \(pattern) — matching mail auto-archives")
             } catch {
                 lastError = error.localizedDescription
