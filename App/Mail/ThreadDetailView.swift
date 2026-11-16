@@ -156,7 +156,8 @@ struct ThreadDetailView: View {
                 onAttachment: { messageId, partId in
                     if let att = detail.attachments[messageId]?.first(where: { $0.partId == partId }) {
                         #if os(macOS)
-                        // ⌥-click still saves to Downloads; a plain click previews.
+                        // Both save to Downloads: a plain click then opens
+                        // Quick Look, ⌥-click reveals the file in Finder.
                         if NSEvent.modifierFlags.contains(.option) { model.download(att); return }
                         #endif
                         model.preview(att)

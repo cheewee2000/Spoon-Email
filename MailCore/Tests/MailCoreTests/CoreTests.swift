@@ -630,6 +630,8 @@ final class CoreTests: XCTestCase {
 
         XCTAssertEqual(MailSearch.ftsQuery("from:sarah vacuum form"),
                        "sender: \"sarah\"* \"vacuum\"* \"form\"*")
+        // Short terms stay whole-word: a one-letter prefix matches everything.
+        XCTAssertEqual(MailSearch.ftsQuery("a to:jo"), "\"a\" recipients: \"jo\"")
 
         let ranked = try await db.writer.read { db in
             try MailSearch.threads(db, match: MailSearch.ftsQuery("sarah vacuum form")!)

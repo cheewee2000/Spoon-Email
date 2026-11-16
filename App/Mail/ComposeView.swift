@@ -42,6 +42,8 @@ struct ComposeView: View {
     @State private var linkURL = ""
     @State private var isDropTargeted = false
     @State private var dropError: String?
+    /// A drop holding images, waiting on the size picked in the dialog.
+    @State private var pendingImageDrop: ((CGFloat?) -> Void)?
     @State private var showSubjectPrompt = false
     @State private var suggestedSubject = ""
     @State private var pendingSendDate: Date?
@@ -232,6 +234,19 @@ struct ComposeView: View {
         }
         .onDrop(of: [.image, .fileURL, .data], isTargeted: $isDropTargeted) { providers in
             receive(providers)
+        }
+        .confirmationDialog("Image Size", isPresented: Binding(
+            get: { pendingImageDrop != nil },
+            set: { if !$0 { pendingImageDrop = nil } })) {
+            ForEach(InlineImageLoader.sizes, id: \.label) { size in
+                Button(size.label) {
+                    pendingImageDrop?(size.maxPixels)
+                    pendingImageDrop = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingImageDrop = nil }
+        } message: {
+            Text("Scale the dropped images down before inserting them?")
         }
         .overlay {
             if isDropTargeted {
@@ -491,10 +506,16 @@ struct ComposeView: View {
         let images = providers.filter(InlineImageLoader.supported)
         let others = providers.filter { !InlineImageLoader.supported($0) && FileAttachmentLoader.supported($0) }
         guard !images.isEmpty || !others.isEmpty else { return false }
+        if images.isEmpty { insert(images, others, maxPixels: nil) }
+        else { pendingImageDrop = { insert(images, others, maxPixels: $0) } }
+        return true
+    }
+
+    private func insert(_ images: [NSItemProvider], _ others: [NSItemProvider], maxPixels: CGFloat?) {
         Task {
             dropError = nil
             if !images.isEmpty {
-                let loaded = await InlineImageLoader.load(images)
+                let loaded = await InlineImageLoader.load(images, maxPixels: maxPixels)
                 if loaded.isEmpty { dropError = "Couldn't read that image." }
                 for (payload, image) in loaded {
                     guard fits(payload) else { break }
@@ -510,12 +531,18 @@ struct ComposeView: View {
                 }
             }
         }
-        return true
     }
 
     /// Files dropped directly on the body text view, which reads its own drag
     /// pasteboard — same routing as `receive`: images inline, the rest attached.
     private func receiveFileURLs(_ urls: [URL]) -> Bool {
+        let hasImage = urls.contains { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }
+        if hasImage { pendingImageDrop = { insertFileURLs(urls, maxPixels: $0) } }
+        else { insertFileURLs(urls, maxPixels: nil) }
+        return true
+    }
+
+    private func insertFileURLs(_ urls: [URL], maxPixels: CGFloat?) {
         dropError = nil
         for url in urls {
             guard let data = try? Data(contentsOf: url), !data.isEmpty else {
@@ -523,7 +550,8 @@ struct ComposeView: View {
                 continue
             }
             let name = url.lastPathComponent
-            if let (payload, image) = InlineImageLoader.prepare(data: data, filename: name) {
+            if let (payload, image) = InlineImageLoader.prepare(data: data, filename: name,
+                                                                maxPixels: maxPixels) {
                 guard fits(payload) else { break }
                 rich.insert(image: InlineImageAttachment(payload: payload, image: image))
             } else {
@@ -535,7 +563,6 @@ struct ComposeView: View {
                 files.append(file)
             }
         }
-        return true
     }
 
     /// Guards the message against outgrowing what Gmail will take. Counts what

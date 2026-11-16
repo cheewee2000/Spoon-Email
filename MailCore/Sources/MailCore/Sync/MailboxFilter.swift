@@ -64,8 +64,13 @@ public enum MailboxFilter: Hashable, Sendable {
                 default: return "other"
                 }
             }()
+            // `+t.category` keeps the planner off the (category, lastDate)
+            // index: newest-first through one category meant stepping over
+            // every inbox thread of an excluded account (300ms per commit
+            // with a 45k-thread account excluded). Per-account like Unified
+            // it's 7ms, and ~20ms at worst with every account included.
             return try MailThread.fetchAll(
-                db, sql: "SELECT t.* \(unifiedJoin) WHERE \(unifiedWhere) AND t.category = ? AND t.isOpen = 0 \(order)",
+                db, sql: "SELECT t.* \(unifiedJoin) WHERE \(unifiedWhere) AND +t.category = ? AND t.isOpen = 0 \(order)",
                 arguments: [cat])
         case .open:
             return try MailThread.fetchAll(
@@ -142,7 +147,7 @@ public enum MailSearch {
     static let operators = [("from:", "sender"), ("to:", "recipients"), ("subject:", "subject")]
 
     /// "sarah vacuum form" → "\"sarah\"* \"vacuum\"* \"form\"*" (prefix-match
-    /// every term, implicit AND). `from:sarah` / `to:sarah` / `subject:x`
+    /// every term of three letters or more, implicit AND). `from:sarah` / `to:sarah` / `subject:x`
     /// pin a term to that one field: `sender: "sarah"*`.
     public static func ftsQuery(_ raw: String) -> String? {
         let terms: [String] = raw
@@ -156,7 +161,10 @@ public enum MailSearch {
                 }
                 word = word.replacingOccurrences(of: "\"", with: "")
                 guard !word.isEmpty else { return nil }
-                let term = "\"\(word)\"*"
+                // One- and two-letter terms match whole words only: "a"*
+                // expands to nearly every message (4s to rank a million
+                // hits), re-run on each sync commit while the search is up.
+                let term = word.count < 3 ? "\"\(word)\"" : "\"\(word)\"*"
                 return column.map { "\($0): \(term)" } ?? term
             }
         guard !terms.isEmpty else { return nil }

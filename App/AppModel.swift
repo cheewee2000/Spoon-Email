@@ -174,9 +174,12 @@ final class AppModel: ObservableObject {
             .tracking { db -> (Int, Int, [MailThread]) in
                 // Same shape as MailboxFilter.unified: the isInbox flag and
                 // its partial index, not a walk of every INBOX label row.
+                // `+t.isOpen` keeps the planner off the open/unread index,
+                // which walked every unread thread ever (430k, 2.9s) on
+                // each commit; the inbox index answers in 6ms.
                 let unified = try Int.fetchOne(db, sql: """
                     SELECT COUNT(*) FROM thread t
-                    WHERE t.isInbox = 1 AND t.isOpen = 0 AND t.isUnread = 1
+                    WHERE t.isInbox = 1 AND +t.isOpen = 0 AND t.isUnread = 1
                       AND t.accountId IN (SELECT id FROM account WHERE includeInUnified = 1)
                     """) ?? 0
                 let open = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM thread WHERE isOpen = 1 AND isUnread = 1") ?? 0
@@ -774,7 +777,7 @@ final class AppModel: ObservableObject {
                 + ThreadHTML.escape(header).replacingOccurrences(of: "\n", with: "<br>")
                 + "</div><br>" + html
         }
-        let attachments = await forwardedAttachments(of: last, html: quotedHTML ?? "")
+        let attachments = await attachments(of: last, html: quotedHTML ?? "")
         draft = ComposeDraft(accountId: thread.accountId, subject: subject,
                              body: "", attachments: attachments,
                              quotedText: header + "\n\n" + text,
@@ -782,9 +785,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Every part of the forwarded message: images its HTML cites stay
-    /// inline under their original content id; the rest ride as files.
-    private func forwardedAttachments(of m: Message, html: String) async -> [ComposeAttachment] {
+    /// Every part of a message being forwarded or a draft being reopened:
+    /// images its HTML cites stay inline under their original content id;
+    /// the rest ride as files.
+    private func attachments(of m: Message, html: String) async -> [ComposeAttachment] {
         let parts: [Attachment] = (try? await db.writer.read { db in
             try Attachment.fetchAll(
                 db,
@@ -807,8 +811,8 @@ final class AppModel: ObservableObject {
                                          data: data, isInline: inline))
         }
         if out.count < parts.count {
-            lastError = "\(parts.count - out.count) attachment(s) couldn't be forwarded "
-                + "(missing or over \(ComposeAttachment.totalByteLimit / 1_000_000) MB)."
+            lastError = "\(parts.count - out.count) attachment(s) couldn't be loaded "
+                + "(missing or over \(ComposeAttachment.totalByteLimit / 1_000_000) MB) — they won't be sent."
         }
         return out
     }
@@ -817,8 +821,8 @@ final class AppModel: ObservableObject {
     /// Sending replaces the draft (it's deleted after successful delivery).
     /// Rebuilds the compose payload for a stored draft — shared by "edit
     /// draft" and by the snapshot that "delete draft" needs to be undoable.
-    private func composeDraft(messageId: String, in thread: MailThread) -> ComposeDraft? {
-        let message: Message? = try? db.writer.read { db in
+    private func composeDraft(messageId: String, in thread: MailThread) async -> ComposeDraft? {
+        let message: Message? = try? await db.writer.read { db in
             try Message.fetchOne(
                 db,
                 sql: "SELECT * FROM message WHERE accountId = ? AND id = ?",
@@ -831,7 +835,7 @@ final class AppModel: ObservableObject {
             .components(separatedBy: .whitespaces)
             .filter { !$0.isEmpty }
             .last ?? ""
-        return ComposeDraft(
+        var d = ComposeDraft(
             accountId: thread.accountId,
             to: m.toList, cc: m.ccList,
             subject: thread.subject,
@@ -841,57 +845,17 @@ final class AppModel: ObservableObject {
             inReplyTo: isReply ? inReplyTo : "",
             references: isReply ? m.referencesHeader : "",
             draftMessageId: m.id)
+        // Every part comes along — inline images and attached files. Re-saving
+        // replaces the Gmail draft with what the composer holds, so a part
+        // left behind here is a part deleted on the next autosave or send.
+        d.attachments = await attachments(of: m, html: d.bodyHTML)
+        return d
     }
 
     func editDraft(messageId: String, in thread: MailThread) {
-        guard var d = composeDraft(messageId: messageId, in: thread) else { return }
-        guard d.bodyHTML.contains("cid:") else {
-            draft = d
-            return
-        }
-        // The body cites images by content id; without their bytes the editor
-        // would drop them, and re-saving would send a draft with holes in it.
         Task {
-            d.attachments = await inlineImages(messageId: messageId,
-                                               accountId: thread.accountId,
-                                               html: d.bodyHTML)
-            draft = d
+            if let d = await composeDraft(messageId: messageId, in: thread) { draft = d }
         }
-    }
-
-    /// Downloads the parts a draft's HTML references as `cid:`, keyed back to
-    /// the same content ids so a re-save reuses them.
-    private func inlineImages(messageId: String, accountId: String,
-                              html: String) async -> [ComposeAttachment] {
-        let parts: [Attachment] = (try? await db.writer.read { db in
-            try Attachment.fetchAll(
-                db,
-                sql: """
-                    SELECT * FROM attachment
-                    WHERE accountId = ? AND messageId = ? AND contentId <> ''
-                    """,
-                arguments: [accountId, messageId])
-        }) ?? []
-        let cited = parts.filter { html.contains("cid:\($0.contentId)") }
-        guard !cited.isEmpty else { return [] }
-
-        let client = accountStore.client(for: accountId)
-        var out: [ComposeAttachment] = []
-        for part in cited {
-            guard let data = try? await client.downloadAttachment(messageId: messageId,
-                                                                  partId: part.partId) else { continue }
-            out.append(ComposeAttachment(id: part.contentId,
-                                         filename: part.filename,
-                                         mimeType: part.mimeType,
-                                         data: data))
-        }
-        if out.count < cited.count {
-            // Better to say so than to let a re-save quietly send a draft with
-            // its images missing.
-            lastError = "\(cited.count - out.count) inline image(s) couldn't be loaded — "
-                + "they'll be dropped if you save or send this draft."
-        }
-        return out
     }
 
     /// Saves the compose sheet's content to Gmail as a draft. Editing an
@@ -943,14 +907,14 @@ final class AppModel: ObservableObject {
         // Snapshot the content before it's gone. Undo re-creates it as a new
         // draft — the old Gmail draft id dies with the server-side delete, so
         // clear it or the restore would try to update a draft that isn't there.
-        var snapshot = composeDraft(messageId: messageId, in: thread)
-        snapshot?.draftMessageId = ""
         Task {
+            var snapshot = await composeDraft(messageId: messageId, in: thread)
+            snapshot?.draftMessageId = ""
             do {
                 let client = accountStore.client(for: thread.accountId)
                 try await client.deleteDraft(messageId: messageId)
                 try? await db.purgeDraft(accountId: thread.accountId, messageId: messageId)
-                if let snapshot {
+                if let snapshot = snapshot {
                     pushUndo("Delete Draft") { [weak self] in self?.saveDraft(snapshot) }
                 }
                 flash("Draft deleted")
@@ -1213,9 +1177,34 @@ final class AppModel: ObservableObject {
         Task { await syncEngine.removeBlock(rule) }
     }
 
-    /// Fetches into a per-attachment temp dir (keeps the real filename, so
-    /// Quick Look picks the right viewer) and opens it in place — no trip
-    /// through Downloads just to look at a PDF.
+    #if os(macOS)
+    /// Writes into ~/Downloads under the attachment's own name. A file already
+    /// there with the same bytes is reused, so clicking an attachment twice
+    /// doesn't pile up name-1, name-2 copies; a different file of that name
+    /// gets a numeric suffix.
+    private func saveToDownloads(_ data: Data, filename: String) throws -> URL {
+        // The sender picks the name: keep only its last component so
+        // "../../x" can't land outside Downloads.
+        var name = (filename as NSString).lastPathComponent
+        if name.isEmpty || name == "." || name == ".." || name == "/" { name = "attachment" }
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        var url = downloads.appendingPathComponent(name)
+        var n = 1
+        while FileManager.default.fileExists(atPath: url.path) {
+            if (try? Data(contentsOf: url, options: .mappedIfSafe)) == data { return url }
+            url = downloads.appendingPathComponent("\(base)-\(n)\(ext.isEmpty ? "" : "." + ext)")
+            n += 1
+        }
+        try data.write(to: url)
+        return url
+    }
+    #endif
+
+    /// Mac: saves to Downloads and opens Quick Look on that copy. iOS has no
+    /// user-visible Downloads, so it previews from a per-attachment temp dir
+    /// (keeps the real filename, so Quick Look picks the right viewer).
     func preview(_ attachment: Attachment) {
         Task {
             flash("Opening \(attachment.filename)…")
@@ -1223,11 +1212,15 @@ final class AppModel: ObservableObject {
                 let client = accountStore.client(for: attachment.accountId)
                 let data = try await client.downloadAttachment(
                     messageId: attachment.messageId, partId: attachment.partId)
+                #if os(macOS)
+                let url = try saveToDownloads(data, filename: attachment.filename)
+                #else
                 let dir = FileManager.default.temporaryDirectory
                     .appendingPathComponent("preview-\(attachment.messageId)-\(attachment.partId)", isDirectory: true)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let url = dir.appendingPathComponent(attachment.filename)
                 try data.write(to: url)
+                #endif
                 syncStatus = nil
                 previewURL = url
             } catch {
@@ -1244,16 +1237,7 @@ final class AppModel: ObservableObject {
                 let data = try await client.downloadAttachment(
                     messageId: attachment.messageId, partId: attachment.partId)
                 #if os(macOS)
-                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-                var url = downloads.appendingPathComponent(attachment.filename)
-                var n = 1
-                while FileManager.default.fileExists(atPath: url.path) {
-                    let base = (attachment.filename as NSString).deletingPathExtension
-                    let ext = (attachment.filename as NSString).pathExtension
-                    url = downloads.appendingPathComponent("\(base)-\(n)\(ext.isEmpty ? "" : "." + ext)")
-                    n += 1
-                }
-                try data.write(to: url)
+                let url = try saveToDownloads(data, filename: attachment.filename)
                 flash("Saved \(url.lastPathComponent) to Downloads")
                 NSWorkspace.shared.activateFileViewerSelecting([url])
                 #else

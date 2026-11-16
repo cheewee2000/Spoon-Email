@@ -32,9 +32,15 @@ final class InlineImageAttachment: NSTextAttachment {
 /// Turns dropped items into inline images: reads the bytes, shrinks anything
 /// oversized, and hands back both the wire payload and something to draw.
 enum InlineImageLoader {
+    /// Sizes offered when images are dropped in — the longest edge in pixels;
+    /// nil keeps the original.
+    static let sizes: [(label: String, maxPixels: CGFloat?)] = [
+        ("Small (640 px)", 640), ("Medium (1280 px)", 1280),
+        ("Large (1800 px)", 1800), ("Actual Size", nil),
+    ]
     /// Full-resolution photos make for multi-megabyte mail, so anything larger
     /// than this gets resampled before it goes on the wire.
-    private static let maxPixels: CGFloat = 1800
+    static let defaultMaxPixels: CGFloat = 1800
     private static let recompressAbove = 1_200_000
 
     /// Decodes attachment bytes for display, without touching them — a
@@ -55,11 +61,12 @@ enum InlineImageLoader {
     }
 
     /// Loads every image among the providers, in drop order.
-    static func load(_ providers: [NSItemProvider]) async -> [(ComposeAttachment, PlatformImage)] {
+    static func load(_ providers: [NSItemProvider],
+                     maxPixels: CGFloat? = defaultMaxPixels) async -> [(ComposeAttachment, PlatformImage)] {
         var out: [(ComposeAttachment, PlatformImage)] = []
         for provider in providers where supported(provider) {
             guard let (data, name) = await rawData(provider) else { continue }
-            guard let loaded = prepare(data: data, filename: name) else { continue }
+            guard let loaded = prepare(data: data, filename: name, maxPixels: maxPixels) else { continue }
             out.append(loaded)
         }
         return out
@@ -89,7 +96,8 @@ enum InlineImageLoader {
 
     /// Decodes, downsamples when needed, and picks the MIME type from the
     /// actual bytes rather than trusting the file extension.
-    static func prepare(data: Data, filename: String) -> (ComposeAttachment, PlatformImage)? {
+    static func prepare(data: Data, filename: String,
+                        maxPixels: CGFloat? = defaultMaxPixels) -> (ComposeAttachment, PlatformImage)? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
 
@@ -99,7 +107,7 @@ enum InlineImageLoader {
 
         var finalImage = cgImage
         var needsReencode = false
-        if widest > maxPixels, let smaller = resample(cgImage, scale: maxPixels / widest) {
+        if let maxPixels, widest > maxPixels, let smaller = resample(cgImage, scale: maxPixels / widest) {
             finalImage = smaller
             needsReencode = true
         }
