@@ -1127,22 +1127,31 @@ final class AppModel: ObservableObject {
 
     func block(_ thread: MailThread, wholeDomain: Bool) {
         let threads = activeList?.threads ?? []
+        // Block whoever wrote to you, not your own last reply in the thread.
+        let me = accountEmail(thread.accountId).lowercased()
+        let sender = (try? db.writer.read { db in
+            try String.fetchOne(db, sql: """
+                SELECT fromEmail FROM message WHERE accountId = ? AND threadId = ?
+                ORDER BY (lower(fromEmail) = ?), date DESC LIMIT 1
+                """, arguments: [thread.accountId, thread.id, me])
+        }) ?? nil
+        guard let email = sender?.lowercased(), email != me else {
+            flash("Only your own messages in this thread — nothing to block")
+            return
+        }
+        let pattern = wholeDomain ? String(email.split(separator: "@").last ?? "") : email
+        guard !pattern.isEmpty else { return }
+        // Archive and move on now; the rule's sweep of every message takes
+        // seconds on a big mailbox and must not hold the email on screen.
+        advanceReader(past: thread, in: threads)
+        ThreadListModel.hideEverywhere(thread.key)
+        let ref = ThreadRef(accountId: thread.accountId, threadId: thread.id)
         Task {
-            guard let m = lastMessage(in: thread) else { return }
-            let email = m.fromEmail.lowercased()
-            let pattern = wholeDomain ? String(email.split(separator: "@").last ?? "") : email
-            guard !pattern.isEmpty else { return }
+            await syncEngine.archive(accountId: thread.accountId, threadId: thread.id)
             do {
                 let (rule, swept) = try await syncEngine.addBlock(
                     pattern: pattern, kind: wholeDomain ? "domain" : "email")
-                // The sweep only reaches inbox threads; a thread blocked from
-                // some other view still archives so blocking always clears it.
-                var archived = swept
-                let ref = ThreadRef(accountId: thread.accountId, threadId: thread.id)
-                if !archived.contains(ref) {
-                    await syncEngine.archive(accountId: thread.accountId, threadId: thread.id)
-                    archived.append(ref)
-                }
+                let archived = [ref] + swept.filter { $0 != ref }
                 // Undo drops the rule *and* returns everything it swept out.
                 pushUndo("Block \(pattern)") { [weak self] in
                     guard let self else { return }
@@ -1156,12 +1165,41 @@ final class AppModel: ObservableObject {
                         }
                     }
                 }
-                advanceReader(past: thread, in: threads)
-                ThreadListModel.hideEverywhere(thread.key)
                 flash("Blocked \(pattern) — matching mail auto-archives")
             } catch {
                 lastError = error.localizedDescription
             }
+        }
+    }
+
+    /// Blocks a typed address ("spam@foo.com") or domain ("foo.com" or
+    /// "@foo.com") from the Manage Blocked sheet. Returns the stored rule,
+    /// or nil when the input isn't an address or domain.
+    func block(typed raw: String) async -> BlockRule? {
+        var p = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if p.hasPrefix("@") { p.removeFirst() }
+        let parts = p.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count <= 2, parts.allSatisfy({ !$0.isEmpty }),
+              let host = parts.last, host.contains("."), !p.contains(where: \.isWhitespace)
+        else { flash("Enter an address like name@example.com or a domain like example.com"); return nil }
+        let kind = parts.count == 2 ? "email" : "domain"
+        do {
+            let (rule, swept) = try await syncEngine.addBlock(pattern: p, kind: kind)
+            pushUndo("Block \(p)") { [weak self] in
+                guard let self else { return }
+                Task {
+                    await self.syncEngine.removeBlock(rule)
+                    for ref in swept {
+                        await self.syncEngine.unarchive(accountId: ref.accountId,
+                                                        threadId: ref.threadId, restoreOpen: false)
+                    }
+                }
+            }
+            flash("Blocked \(p) — matching mail auto-archives")
+            return rule
+        } catch {
+            lastError = error.localizedDescription
+            return nil
         }
     }
 

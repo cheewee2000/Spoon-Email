@@ -5,6 +5,7 @@ struct BlockedListView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var rules: [BlockRule] = []
+    @State private var newPattern = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,9 +19,25 @@ struct BlockedListView: View {
             }
             .padding(12)
             Hairline()
+            HStack {
+                TextField("name@example.com or example.com", text: $newPattern)
+                    .textFieldStyle(.plain)
+                    .font(CWT.font(12))
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+                    #endif
+                    .onSubmit(add)
+                Button("Block", action: add)
+                    .buttonStyle(.square)
+                    .disabled(newPattern.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(12)
+            Hairline()
             if rules.isEmpty {
                 EmptyState(title: "Nothing blocked", systemImage: "hand.raised",
-                           detail: "Block a sender or domain from a message's ••• menu.")
+                           detail: "Type an address or domain above, or block from a message's ••• menu.")
             } else {
                 List(rules) { rule in
                     HStack {
@@ -49,6 +66,16 @@ struct BlockedListView: View {
         #endif
         .task {
             rules = await model.loadBlockRules()
+        }
+    }
+
+    private func add() {
+        let typed = newPattern
+        Task {
+            guard let rule = await model.block(typed: typed) else { return }
+            newPattern = ""
+            rules.removeAll { $0.pattern == rule.pattern }
+            rules.insert(rule, at: 0)
         }
     }
 }

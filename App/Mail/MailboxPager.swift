@@ -17,6 +17,9 @@ import MailCore
 struct MailboxPager: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var order: SidebarOrder
+    /// The reader has its own half of the screen (see RootView): rows select
+    /// into it rather than pushing over the list.
+    var split = false
 
     @State private var searchText = ""
     @StateObject private var searchList = ThreadListModel()
@@ -46,7 +49,7 @@ struct MailboxPager: View {
                 Hairline()
                 page
             } else {
-                ThreadPageList(list: searchList, emptyText: "No matches") {
+                ThreadPageList(list: searchList, emptyText: "No matches", split: split) {
                     readerList = $0
                     // The reader's neighbor prefetch reads `activeList`; without
                     // this it's Mac-only and every advance renders from scratch.
@@ -69,8 +72,13 @@ struct MailboxPager: View {
                 }
             }
         }
-        .navigationDestination(for: MailThread.self) { thread in
-            ThreadReader(start: thread, list: readerList)
+        // One selection drives both layouts, so the open email survives the
+        // Duo unfolding or a rotation: pushed here, or beside the list.
+        .navigationDestination(isPresented: Binding(
+            get: { !split && model.selectedThread != nil },
+            set: { if !$0 { model.selectedThread = nil } }
+        )) {
+            ThreadReader(list: readerList)
         }
         .overlay {
             if items.isEmpty {
@@ -164,7 +172,7 @@ struct MailboxPager: View {
 
     private var page: some View {
         ZStack {
-            MailboxPage(item: current) {
+            MailboxPage(item: current, split: split) {
                 readerList = $0
                 model.activeList = $0
             }
@@ -188,20 +196,40 @@ struct MailboxPager: View {
     private func move(to item: SidebarItem) {
         guard item != current else { return }
         forward = (items.firstIndex(of: item) ?? 0) > index
-        withAnimation(.easeInOut(duration: 0.22)) { model.mailbox = item.filter }
+        withAnimation(.easeInOut(duration: 0.22)) {
+            model.mailbox = item.filter
+            // The reader walks the list it was opened from; that list is leaving.
+            model.selectedThread = nil
+        }
     }
 }
 
 /// One mailbox as a page, with its own live query.
 private struct MailboxPage: View {
     let item: SidebarItem
+    let split: Bool
     let onActive: (ThreadListModel) -> Void
     @EnvironmentObject var model: AppModel
     @StateObject private var list = ThreadListModel(pageSize: 50)
 
     var body: some View {
-        ThreadPageList(list: list, emptyText: "Nothing here", onActive: onActive)
+        ThreadPageList(list: list, emptyText: "Nothing here", split: split, onActive: onActive)
             .onAppear { list.observe(db: model.db, filter: item.filter) }
+    }
+}
+
+/// The reader's half of the split layout.
+struct SplitReader: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if model.selectedThread != nil, let list = model.activeList {
+            ThreadReader(list: list)
+        } else {
+            EmptyState(title: "No email selected", systemImage: "envelope")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(CWT.paper)
+        }
     }
 }
 
@@ -210,19 +238,18 @@ private struct MailboxPage: View {
 /// a whole inbox can be read without bouncing back to the list.
 private struct ThreadReader: View {
     @EnvironmentObject var model: AppModel
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject var list: ThreadListModel
-    @State private var current: MailThread
+    /// `model.selectedThread` is what's on screen, but it clears the moment a
+    /// pop starts — and the outgoing screen still needs something to draw.
+    @State private var last: MailThread?
     /// Where `current` last sat in the list. Once it's archived it leaves the
     /// list, and whatever slid into its slot is the next one to read.
     @State private var position = 0
 
-    init(start: MailThread, list: ThreadListModel) {
-        self.list = list
-        _current = State(initialValue: start)
-    }
+    private var current: MailThread? { model.selectedThread ?? last }
 
     private var next: MailThread? {
+        guard let current else { return nil }
         let threads = list.threads
         if let idx = threads.firstIndex(where: { $0.key == current.key }) {
             return idx + 1 < threads.count ? threads[idx + 1] : nil
@@ -231,31 +258,36 @@ private struct ThreadReader: View {
     }
 
     private var previous: MailThread? {
+        guard let current else { return nil }
         let threads = list.threads
         let idx = threads.firstIndex(where: { $0.key == current.key }) ?? position
         return idx > 0 && idx - 1 < threads.count ? threads[idx - 1] : nil
     }
 
     var body: some View {
-        ThreadDetailView(thread: current,
-                         onArchive: {
-                             let leaving = current
-                             // Slide to the next thread like the pull does —
-                             // the motion also covers the page's load time.
-                             model.readerSlideForward = true
-                             withAnimation(CWT.nav) { advance(orDismiss: true) }
-                             model.archive(leaving)
-                         },
-                         nextThread: next,
-                         previousThread: previous,
-                         onPullNext: { advance(orDismiss: false) },
-                         onPullPrevious: { retreat() })
-            .onAppear { track() }
-            .onChange(of: list.threads) { track() }
+        if let current {
+            ThreadDetailView(thread: current,
+                             onArchive: {
+                                 // Slide to the next thread like the pull does —
+                                 // the motion also covers the page's load time.
+                                 model.readerSlideForward = true
+                                 withAnimation(CWT.nav) { advance(orClose: true) }
+                                 model.archive(current)
+                             },
+                             nextThread: next,
+                             previousThread: previous,
+                             onPullNext: { advance(orClose: false) },
+                             onPullPrevious: { retreat() })
+                .onAppear { last = current; track() }
+                .onChange(of: model.selectedThread) { _, new in
+                    if let new { last = new }
+                }
+                .onChange(of: list.threads) { track() }
+        }
     }
 
     private func track() {
-        if let idx = list.threads.firstIndex(where: { $0.key == current.key }) {
+        if let idx = list.threads.firstIndex(where: { $0.key == current?.key }) {
             position = idx
         }
         // Keep a page of threads ahead of the reader.
@@ -265,15 +297,15 @@ private struct ThreadReader: View {
     private func retreat() {
         guard let previous else { return }
         position = list.threads.firstIndex { $0.key == previous.key } ?? position
-        current = previous
+        model.selectedThread = previous
     }
 
-    private func advance(orDismiss: Bool) {
+    private func advance(orClose: Bool) {
         if let next {
             position = list.threads.firstIndex { $0.key == next.key } ?? position
-            current = next
-        } else if orDismiss {
-            dismiss()
+            model.selectedThread = next
+        } else if orClose {
+            model.selectedThread = nil
         }
     }
 }
@@ -283,15 +315,30 @@ private struct ThreadPageList: View {
     @ObservedObject var list: ThreadListModel
     @EnvironmentObject var model: AppModel
     let emptyText: String
+    let split: Bool
     let onActive: (ThreadListModel) -> Void
 
     var body: some View {
         List {
             ForEach(list.threads, id: \.key) { thread in
-                NavigationLink(value: thread) {
-                    ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
-                        .collapsed(list.collapsing.contains(thread.key))
+                Button {
+                    // Beside the list the reader slides between threads, as
+                    // on the Mac; a push brings its own animation.
+                    if split { model.select(thread) } else { model.selectedThread = thread }
+                } label: {
+                    HStack(spacing: 8) {
+                        ThreadRow(thread: thread, accountColor: model.accountColor(thread.accountId))
+                        if !split {
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .collapsed(list.collapsing.contains(thread.key))
                 }
+                .buttonStyle(.plain)
+                .listRowBackground(split && model.selectedThread?.key == thread.key ? CWT.selection : nil)
                 .listRowSeparatorTint(CWT.hairline)
                 .swipeActions(edge: .trailing) {
                     if model.mailbox == .spam {

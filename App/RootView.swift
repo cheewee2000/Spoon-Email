@@ -23,6 +23,10 @@ struct RootView: View {
     /// The phone opens on the mail itself (the pager lands on Unified);
     /// the rail stays one back-swipe away.
     @State private var compactColumn = NavigationSplitViewColumn.detail
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// Width of the list half when the reader sits beside it; nil when the
+    /// reader is pushed over the list instead.
+    @State private var splitWidth: CGFloat?
     #endif
 
     var body: some View {
@@ -39,15 +43,39 @@ struct RootView: View {
             #else
             // No board on the phone — nine columns don't fit. One mailbox at a
             // time, swiped between, with the rail still a swipe further left.
-            NavigationSplitView(preferredCompactColumn: $compactColumn) {
-                sidebar
-            } detail: {
-                // The stack is what arms the pager's NavigationLinks — in a
-                // bare split-view detail column they render but do nothing.
-                NavigationStack {
-                    MailboxPager(order: order)
+            HStack(spacing: 0) {
+                NavigationSplitView(preferredCompactColumn: $compactColumn) {
+                    sidebar
+                } detail: {
+                    // The stack is what pushes the reader when there's no
+                    // room for it alongside.
+                    NavigationStack {
+                        MailboxPager(order: order, split: splitWidth != nil)
+                    }
+                }
+                // Half an unfolded Duo is a phone: it keeps the phone's
+                // one-column navigation, rail a back-swipe away.
+                .environment(\.horizontalSizeClass, splitWidth == nil ? sizeClass : .compact)
+                .frame(width: splitWidth)
+                if splitWidth != nil {
+                    Hairline(axis: .vertical)
+                    SplitReader()
                 }
             }
+            // Landscape with room for two phone-width panes — an unfolded
+            // iPhone Duo, an iPad on its side: the list keeps the left half,
+            // the reader takes the right. Measured on the whole window so the
+            // seam lands on the Duo's hinge whatever the safe areas (or the
+            // keyboard) are doing.
+            .onGeometryChange(for: CGFloat?.self) { geo in
+                let inset = geo.safeAreaInsets
+                let width = geo.size.width + inset.leading + inset.trailing
+                let height = geo.size.height + inset.top + inset.bottom
+                // 600 tall keeps an ordinary phone on its side (440 at most)
+                // on the one-pane layout.
+                return width >= 700 && width > height && height >= 600
+                    ? (width / 2 - inset.leading).rounded() : nil
+            } action: { splitWidth = $0 }
             #endif
         }
         .safeAreaInset(edge: .top, spacing: 0) { reauthBanner }
