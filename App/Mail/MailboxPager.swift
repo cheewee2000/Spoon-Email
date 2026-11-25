@@ -338,25 +338,14 @@ private struct ThreadPageList: View {
                     .collapsed(list.collapsing.contains(thread.key))
                 }
                 .buttonStyle(.plain)
-                .listRowBackground(split && model.selectedThread?.key == thread.key ? CWT.selection : nil)
                 .listRowSeparatorTint(CWT.hairline)
-                .swipeActions(edge: .trailing) {
-                    if model.mailbox == .spam {
-                        Button {
-                            model.notSpam(thread)
-                        } label: {
-                            Label("Not Spam", systemImage: "checkmark.shield")
-                        }
-                        .tint(CWT.green)
-                    } else {
-                        Button {
-                            model.archive(thread)
-                        } label: {
-                            Label("Archive", systemImage: "archivebox")
-                        }
-                        .tint(CWT.green)
-                    }
-                }
+                .modifier(SwipeToCommit(
+                    label: model.mailbox == .spam ? "Not Spam" : "Archive",
+                    systemImage: model.mailbox == .spam ? "checkmark.shield" : "archivebox",
+                    background: split && model.selectedThread?.key == thread.key ? CWT.selection : nil
+                ) {
+                    if model.mailbox == .spam { model.notSpam(thread) } else { model.archive(thread) }
+                })
                 .swipeActions(edge: .leading) {
                     Button {
                         model.markRead(thread, read: thread.isUnread)
@@ -390,6 +379,86 @@ private struct ThreadPageList: View {
                     .font(CWT.caption)
                     .foregroundStyle(CWT.ink3)
             }
+        }
+    }
+}
+
+/// A left swipe on a row that acts when you let go. `swipeActions` only does
+/// that for a swipe across most of the row; anything shorter parks a button
+/// you then have to press. Here the row follows the finger over a green
+/// strip, and releasing past `threshold` (about where that button would have
+/// parked) commits.
+private struct SwipeToCommit: ViewModifier {
+    let label: String
+    let systemImage: String
+    /// The row's resting background. It's set here because the strip has to
+    /// be drawn in the row background to reach the cell's edges.
+    let background: Color?
+    let action: () -> Void
+    @State private var offset: CGFloat = 0
+    private static let threshold: CGFloat = 72
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: offset)
+            .gesture(LeftPan { pan in
+                let x = min(0, pan.translation(in: pan.view).x)
+                switch pan.state {
+                case .changed:
+                    offset = x
+                case .ended where x < -Self.threshold:
+                    // Off the edge; the row's collapse takes it from there.
+                    withAnimation(.easeOut(duration: 0.15)) { offset = -(pan.view?.bounds.width ?? 0) }
+                    action()
+                case .ended, .cancelled:
+                    withAnimation(.easeOut(duration: 0.15)) { offset = 0 }
+                default:
+                    break
+                }
+            })
+            // nil at rest keeps the list's own row background.
+            .listRowBackground(offset == 0 && background == nil ? nil : ZStack(alignment: .trailing) {
+                background ?? .clear
+                CWT.green
+                    .frame(width: max(0, -offset))
+                    .overlay(alignment: .trailing) {
+                        Image(systemName: systemImage)
+                            .foregroundStyle(.white)
+                            .padding(.trailing, 24)
+                    }
+                    .clipped()
+            })
+            .sensoryFeedback(.impact, trigger: offset < -Self.threshold)
+            .accessibilityAction(named: label, action)
+    }
+}
+
+/// A pan that begins only for leftward, mostly-horizontal drags, so vertical
+/// scrolling and the leading swipe actions carry on as before. (A SwiftUI
+/// `DragGesture` on a list row takes the scroll away with it.)
+private struct LeftPan: UIGestureRecognizerRepresentable {
+    let handle: (UIPanGestureRecognizer) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.delegate = context.coordinator
+        return pan
+    }
+
+    func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) { handle(pan) }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer, let view = pan.view else { return false }
+            let v = pan.velocity(in: view)
+            guard v.x < 0, abs(v.x) > abs(v.y) else { return false }
+            // With the leading actions pulled open the cell sits shifted
+            // right; the swipe back that closes them must not archive.
+            var list = view.superview
+            while let s = list, !(s is UIScrollView) { list = s.superview }
+            return view.convert(CGPoint.zero, to: list).x < 40
         }
     }
 }
